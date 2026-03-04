@@ -2,5 +2,11 @@
   "mode": "manual",
   "sensor_idx": 1,
   "cdr_delay_start": 0,
+  "eq_offset": 0,
+  "eq_dg0_enable": 0,
+  "eq_sr0": 0,
+  "eq_dg1_enable": 0,
+  "eq_sr1": 0,
+  "eq_bw": 0,
   "phy_mode": "auto"
 }

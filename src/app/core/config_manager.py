@@ -11,6 +11,12 @@ class AppConfig:
     sensor_idx: int = 1
     sensor_mode: list[int] | None = None
     cdr_delay_start: int = 0
+    eq_offset: int = 0
+    eq_dg0_enable: int = 0
+    eq_sr0: int = 0
+    eq_dg1_enable: int = 0
+    eq_sr1: int = 0
+    eq_bw: int = 0
     phy_mode: str = "auto"
 
 
@@ -33,6 +39,12 @@ class ConfigManager:
             sensor_idx=self._normalize_sensor_idx(raw_data.get("sensor_idx")),
             sensor_mode=self._normalize_sensor_modes(raw_data.get("sensor_mode")),
             cdr_delay_start=self._normalize_cdr_delay_start(raw_data.get("cdr_delay_start"), mode),
+            eq_offset=self._normalize_integer(raw_data.get("eq_offset"), minimum=-31, maximum=31, default=0),
+            eq_dg0_enable=self._normalize_integer(raw_data.get("eq_dg0_enable"), minimum=0, maximum=1, default=0),
+            eq_sr0=self._normalize_integer(raw_data.get("eq_sr0"), minimum=0, maximum=15, default=0),
+            eq_dg1_enable=self._normalize_integer(raw_data.get("eq_dg1_enable"), minimum=0, maximum=1, default=0),
+            eq_sr1=self._normalize_integer(raw_data.get("eq_sr1"), minimum=0, maximum=15, default=0),
+            eq_bw=self._normalize_integer(raw_data.get("eq_bw"), minimum=0, maximum=3, default=0),
             phy_mode=str(raw_data.get("phy_mode", "auto")),
         )
 
@@ -89,3 +101,11 @@ class ConfigManager:
 
         maximum = 254 if mode == "dify" else 31
         return min(max(cdr_delay_start, 0), maximum)
+
+    @staticmethod
+    def _normalize_integer(raw_value: object, *, minimum: int, maximum: int, default: int) -> int:
+        try:
+            value = int(raw_value)
+        except (TypeError, ValueError):
+            return default
+        return min(max(value, minimum), maximum)

@@ -25,13 +25,26 @@ class CommandProcessor:
             combo_text = ", ".join(combinations)
             return (
                 f"[{timestamp}] auto command='{command}' combinations={combo_text} "
-                f"cdr_delay_start={config.cdr_delay_start} phy_mode={config.phy_mode}"
+                f"cdr_delay_start={config.cdr_delay_start} "
+                f"eq_offset={config.eq_offset} "
+                f"eq_dg0_enable={config.eq_dg0_enable} "
+                f"eq_sr0={config.eq_sr0} "
+                f"eq_dg1_enable={config.eq_dg1_enable} "
+                f"eq_sr1={config.eq_sr1} "
+                f"eq_bw={config.eq_bw} "
+                f"phy_mode={config.phy_mode}"
             )
 
         return (
             f"[{timestamp}] {config.mode} command='{command}' "
             f"sensor_idx={config.sensor_idx} "
             f"cdr_delay_start={config.cdr_delay_start} "
+            f"eq_offset={config.eq_offset} "
+            f"eq_dg0_enable={config.eq_dg0_enable} "
+            f"eq_sr0={config.eq_sr0} "
+            f"eq_dg1_enable={config.eq_dg1_enable} "
+            f"eq_sr1={config.eq_sr1} "
+            f"eq_bw={config.eq_bw} "
             f"phy_mode={config.phy_mode}"
         )
 
