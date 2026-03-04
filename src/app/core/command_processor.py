@@ -23,11 +23,15 @@ class CommandProcessor:
                         f"(sensor_idx={sensor_idx}, sensor_mode={sensor_mode}, dts_idx={dts_idx})"
                     )
             combo_text = ", ".join(combinations)
-            return f"[{timestamp}] auto command='{command}' combinations={combo_text} phy_mode={config.phy_mode}"
+            return (
+                f"[{timestamp}] auto command='{command}' combinations={combo_text} "
+                f"cdr_delay_start={config.cdr_delay_start} phy_mode={config.phy_mode}"
+            )
 
         return (
-            f"[{timestamp}] manual command='{command}' "
+            f"[{timestamp}] {config.mode} command='{command}' "
             f"sensor_idx={config.sensor_idx} "
+            f"cdr_delay_start={config.cdr_delay_start} "
             f"phy_mode={config.phy_mode}"
         )
 
