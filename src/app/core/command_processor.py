@@ -13,6 +13,8 @@ class CommandProcessor:
     def send(self, command: str, config: AppConfig) -> str:
         timestamp = datetime.now().strftime("%H:%M:%S")
 
+        adb_device_text = config.adb_device or "not-selected"
+
         if config.mode == "auto":
             sensor_modes = config.sensor_mode or [0, 1, 2]
             combinations = []
@@ -24,7 +26,7 @@ class CommandProcessor:
                     )
             combo_text = ", ".join(combinations)
             return (
-                f"[{timestamp}] auto command='{command}' combinations={combo_text} "
+                f"[{timestamp}] auto command='{command}' adb_device={adb_device_text} combinations={combo_text} "
                 f"cdr_delay_start={config.cdr_delay_start} "
                 f"eq_offset={config.eq_offset} "
                 f"eq_dg0_enable={config.eq_dg0_enable} "
@@ -36,7 +38,7 @@ class CommandProcessor:
             )
 
         return (
-            f"[{timestamp}] {config.mode} command='{command}' "
+            f"[{timestamp}] {config.mode} command='{command}' adb_device={adb_device_text} "
             f"sensor_idx={config.sensor_idx} "
             f"cdr_delay_start={config.cdr_delay_start} "
             f"eq_offset={config.eq_offset} "
