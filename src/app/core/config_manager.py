@@ -8,13 +8,16 @@ import json
 @dataclass
 class AppConfig:
     mode: str = "manual"
-    sensor_idx: int = 0
+    sensor_idx: int = 1
     sensor_mode: list[int] | None = None
+    cdr_delay_start: int = 0
     phy_mode: str = "auto"
 
 
 class ConfigManager:
     """Load and save application configuration from a YAML-compatible JSON file."""
+
+    _SENSOR_INDEXES = (1, 2, 4, 8, 16)
 
     def __init__(self, config_path: Path) -> None:
         self.config_path = config_path
@@ -24,10 +27,12 @@ class ConfigManager:
             return AppConfig()
 
         raw_data = json.loads(self.config_path.read_text(encoding="utf-8"))
+        mode = str(raw_data.get("mode", "manual"))
         return AppConfig(
-            mode=str(raw_data.get("mode", "manual")),
-            sensor_idx=int(raw_data.get("sensor_idx", 0)),
+            mode=mode,
+            sensor_idx=self._normalize_sensor_idx(raw_data.get("sensor_idx")),
             sensor_mode=self._normalize_sensor_modes(raw_data.get("sensor_mode")),
+            cdr_delay_start=self._normalize_cdr_delay_start(raw_data.get("cdr_delay_start"), mode),
             phy_mode=str(raw_data.get("phy_mode", "auto")),
         )
 
@@ -40,6 +45,16 @@ class ConfigManager:
             json.dumps(payload, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+
+    @classmethod
+    def _normalize_sensor_idx(cls, raw_sensor_idx: object) -> int:
+        try:
+            sensor_idx = int(raw_sensor_idx)
+        except (TypeError, ValueError):
+            return 1
+        if sensor_idx in cls._SENSOR_INDEXES:
+            return sensor_idx
+        return 1
 
     @staticmethod
     def _normalize_sensor_modes(raw_sensor_mode: object) -> list[int] | None:
@@ -64,3 +79,13 @@ class ConfigManager:
             return None
 
         return sorted(set(normalized))
+
+    @staticmethod
+    def _normalize_cdr_delay_start(raw_cdr_delay_start: object, mode: str) -> int:
+        try:
+            cdr_delay_start = int(raw_cdr_delay_start)
+        except (TypeError, ValueError):
+            return 0
+
+        maximum = 254 if mode == "dify" else 31
+        return min(max(cdr_delay_start, 0), maximum)
