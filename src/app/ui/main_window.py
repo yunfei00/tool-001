@@ -44,6 +44,24 @@ class MainWindow(QMainWindow):
         self._cdr_delay_start = QSpinBox()
         self._cdr_delay_start.setRange(0, 31)
 
+        self._eq_offset = QSpinBox()
+        self._eq_offset.setRange(-31, 31)
+
+        self._eq_dg0_enable = QComboBox()
+        self._eq_dg0_enable.addItems(["0", "1"])
+
+        self._eq_sr0 = QSpinBox()
+        self._eq_sr0.setRange(0, 15)
+
+        self._eq_dg1_enable = QComboBox()
+        self._eq_dg1_enable.addItems(["0", "1"])
+
+        self._eq_sr1 = QSpinBox()
+        self._eq_sr1.setRange(0, 15)
+
+        self._eq_bw = QComboBox()
+        self._eq_bw.addItems(["0", "1", "2", "3"])
+
         self._phy_mode = QComboBox()
         self._phy_mode.addItems(["auto", "master", "slave"])
 
@@ -72,6 +90,12 @@ class MainWindow(QMainWindow):
         self._sensor_mode_label = "Sensor mode"
         self._config_form.addRow(self._sensor_mode_label, self._sensor_mode)
         self._config_form.addRow("CDR delay start", self._cdr_delay_start)
+        self._config_form.addRow("EQ offset", self._eq_offset)
+        self._config_form.addRow("EQ dg0 enable", self._eq_dg0_enable)
+        self._config_form.addRow("EQ sr0", self._eq_sr0)
+        self._config_form.addRow("EQ dg1 enable", self._eq_dg1_enable)
+        self._config_form.addRow("EQ sr1", self._eq_sr1)
+        self._config_form.addRow("EQ bw", self._eq_bw)
         self._config_form.addRow("Phy mode", self._phy_mode)
         config_group.setLayout(self._config_form)
 
@@ -126,6 +150,12 @@ class MainWindow(QMainWindow):
             sensor_idx=sensor_idx_value,
             sensor_mode=sensor_modes,
             cdr_delay_start=self._cdr_delay_start.value(),
+            eq_offset=self._eq_offset.value(),
+            eq_dg0_enable=int(self._eq_dg0_enable.currentText()),
+            eq_sr0=self._eq_sr0.value(),
+            eq_dg1_enable=int(self._eq_dg1_enable.currentText()),
+            eq_sr1=self._eq_sr1.value(),
+            eq_bw=int(self._eq_bw.currentText()),
             phy_mode=self._phy_mode.currentText(),
         )
 
@@ -138,6 +168,12 @@ class MainWindow(QMainWindow):
         else:
             self._sensor_mode.clear()
         self._cdr_delay_start.setValue(config.cdr_delay_start)
+        self._eq_offset.setValue(config.eq_offset)
+        self._eq_dg0_enable.setCurrentText(str(config.eq_dg0_enable))
+        self._eq_sr0.setValue(config.eq_sr0)
+        self._eq_dg1_enable.setCurrentText(str(config.eq_dg1_enable))
+        self._eq_sr1.setValue(config.eq_sr1)
+        self._eq_bw.setCurrentText(str(config.eq_bw))
         self._phy_mode.setCurrentText(config.phy_mode)
         self._update_mode_dependent_fields(self._mode.currentText())
 
@@ -171,17 +207,35 @@ class MainWindow(QMainWindow):
 
     def _refresh_param_details(self, cdr_max: int) -> None:
         lines = [
-            "para1: sensor idx",
-            "- type: List",
+            "1) sensor idx",
+            "- type: list",
             "- allowed: 1, 2, 4, 8, 16",
             "",
-            "para2: sensor mode",
-            "- type: List",
+            "2) sensor mode",
+            "- type: list",
             "- allowed: 0, 1, 2",
             "",
-            "para3: cdr delay start",
+            "3) cdr delay start",
             f"- range: 0 ~ {cdr_max}",
             "- mode linkage: mode=dify -> 0 ~ 254, others -> 0 ~ 31",
+            "",
+            "4) eq offset",
+            "- range: -31 ~ 31",
+            "",
+            "5) eq dg0 enable",
+            "- allowed: 0, 1",
+            "",
+            "6) eq sr0",
+            "- range: 0 ~ 15",
+            "",
+            "7) eq dg1 enable",
+            "- allowed: 0, 1",
+            "",
+            "8) eq sr1",
+            "- range: 0 ~ 15",
+            "",
+            "9) eq bw",
+            "- allowed: 0, 1, 2, 3",
         ]
         self._param_detail.setPlainText("\n".join(lines))
 
