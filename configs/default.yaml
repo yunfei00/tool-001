@@ -1,1 +1,5 @@
-
+{
+  "sensor_idx": 0,
+  "sensor_mode": "normal",
+  "phy_mode": "auto"
+}
