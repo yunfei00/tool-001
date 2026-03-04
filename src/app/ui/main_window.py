@@ -85,7 +85,7 @@ class MainWindow(QMainWindow):
     def _build_ui(self) -> None:
         config_group = QGroupBox("Configuration")
         self._config_form = QFormLayout()
-        self._config_form.addRow("Mode", self._mode)
+        self._config_form.addRow("Mode", self._with_step_send(self._mode, "mode"))
 
         adb_device_row = QWidget()
         adb_device_layout = QHBoxLayout()
@@ -93,19 +93,20 @@ class MainWindow(QMainWindow):
         adb_device_layout.addWidget(self._adb_device_combo)
         adb_device_layout.addWidget(self._scan_adb_button)
         adb_device_row.setLayout(adb_device_layout)
-        self._config_form.addRow("ADB Device", adb_device_row)
+        self._config_form.addRow("ADB Device", self._with_step_send(adb_device_row, "adb device"))
 
-        self._config_form.addRow("Sensor idx", self._sensor_idx)
+        self._config_form.addRow("Sensor idx", self._with_step_send(self._sensor_idx, "sensor idx"))
         self._sensor_mode_label = "Sensor mode"
-        self._config_form.addRow(self._sensor_mode_label, self._sensor_mode)
-        self._config_form.addRow("CDR delay start", self._cdr_delay_start)
-        self._config_form.addRow("EQ offset", self._eq_offset)
-        self._config_form.addRow("EQ dg0 enable", self._eq_dg0_enable)
-        self._config_form.addRow("EQ sr0", self._eq_sr0)
-        self._config_form.addRow("EQ dg1 enable", self._eq_dg1_enable)
-        self._config_form.addRow("EQ sr1", self._eq_sr1)
-        self._config_form.addRow("EQ bw", self._eq_bw)
-        self._config_form.addRow("Phy mode", self._phy_mode)
+        self._sensor_mode_row = self._with_step_send(self._sensor_mode, "sensor mode")
+        self._config_form.addRow(self._sensor_mode_label, self._sensor_mode_row)
+        self._config_form.addRow("CDR delay", self._with_step_send(self._cdr_delay_start, "cdr delay"))
+        self._config_form.addRow("EQ offset", self._with_step_send(self._eq_offset, "eq offset"))
+        self._config_form.addRow("EQ dg0 enable", self._with_step_send(self._eq_dg0_enable, "eq dg0 enable"))
+        self._config_form.addRow("EQ sr0", self._with_step_send(self._eq_sr0, "eq sr0"))
+        self._config_form.addRow("EQ dg1 enable", self._with_step_send(self._eq_dg1_enable, "eq dg1 enable"))
+        self._config_form.addRow("EQ sr1", self._with_step_send(self._eq_sr1, "eq sr1"))
+        self._config_form.addRow("EQ bw", self._with_step_send(self._eq_bw, "eq bw"))
+        self._config_form.addRow("Phy mode", self._with_step_send(self._phy_mode, "phy mode"))
         config_group.setLayout(self._config_form)
 
         detail_group = QGroupBox("Parameter Details")
@@ -227,8 +228,8 @@ class MainWindow(QMainWindow):
 
     def _update_mode_dependent_fields(self, mode: str) -> None:
         has_sensor_mode = mode in {"auto", "dify"}
-        self._sensor_mode.setVisible(has_sensor_mode)
-        sensor_mode_label = self._config_form.labelForField(self._sensor_mode)
+        self._sensor_mode_row.setVisible(has_sensor_mode)
+        sensor_mode_label = self._config_form.labelForField(self._sensor_mode_row)
         if sensor_mode_label is not None:
             sensor_mode_label.setVisible(has_sensor_mode)
 
@@ -239,52 +240,70 @@ class MainWindow(QMainWindow):
 
     def _refresh_param_details(self, cdr_max: int) -> None:
         lines = [
-            "1) adb device - 单步发送",
+            "1) adb device",
             "- source: adb devices",
             "- behavior: if multiple devices are found, user selects one manually",
             "",
-            "2) sensor idx - 单步发送",
+            "2) sensor idx",
             "- type: single-select checkbox",
             "- allowed: 1, 2, 4, 8, 16",
             "",
-            "3) sensor mode - 单步发送",
+            "3) sensor mode",
             "- type: single-select checkbox",
             "- allowed: 0, 1, 2",
             "",
-            "4) cdr delay start - 单步发送",
+            "4) cdr delay",
             f"- range: 0 ~ {cdr_max}",
             "- mode linkage: mode=dify -> 0 ~ 254, others -> 0 ~ 31",
             "",
-            "5) eq offset - 单步发送",
+            "5) eq offset",
             "- range: -31 ~ 31",
             "",
-            "6) eq dg0 enable - 单步发送",
+            "6) eq dg0 enable",
             "- type: single-select checkbox",
             "- allowed: 0, 1",
             "",
-            "7) eq sr0 - 单步发送",
+            "7) eq sr0",
             "- range: 0 ~ 15",
             "",
-            "8) eq dg1 enable - 单步发送",
+            "8) eq dg1 enable",
             "- type: single-select checkbox",
             "- allowed: 0, 1",
             "",
-            "9) eq sr1 - 单步发送",
+            "9) eq sr1",
             "- range: 0 ~ 15",
             "",
-            "10) eq bw - 单步发送",
+            "10) eq bw",
             "- type: single-select checkbox",
             "- allowed: 0, 1, 2, 3",
             "",
-            "11) mode - 单步发送",
+            "11) mode",
             "- type: single-select checkbox",
             "- allowed: manual, auto, dify",
             "",
-            "12) phy mode - 单步发送",
+            "12) phy mode",
             "- type: single-select checkbox",
             "- allowed: auto, master, slave",
         ]
         self._param_detail.setPlainText("\n".join(lines))
+
+    def _with_step_send(self, field: QWidget, command: str) -> QWidget:
+        row = QWidget()
+        layout = QHBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(field)
+        step_send_button = QPushButton("单步发送")
+        step_send_button.clicked.connect(lambda: self._send_single_step(command))
+        layout.addWidget(step_send_button)
+        row.setLayout(layout)
+        return row
+
+    def _send_single_step(self, command: str) -> None:
+        if not self._selected_adb_device():
+            self._append_log("No adb device selected. Please scan and choose one device first.")
+            return
+        response = self._command_processor.send(command, self._collect_config())
+        self._append_log(response)
 
     def _append_log(self, message: str) -> None:
         self._log_output.append(message)
