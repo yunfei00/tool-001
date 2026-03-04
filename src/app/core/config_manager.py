@@ -8,6 +8,7 @@ import json
 @dataclass
 class AppConfig:
     mode: str = "manual"
+    adb_device: str | None = None
     sensor_idx: int = 1
     sensor_mode: list[int] | None = None
     cdr_delay_start: int = 0
@@ -36,6 +37,7 @@ class ConfigManager:
         mode = str(raw_data.get("mode", "manual"))
         return AppConfig(
             mode=mode,
+            adb_device=self._normalize_adb_device(raw_data.get("adb_device")),
             sensor_idx=self._normalize_sensor_idx(raw_data.get("sensor_idx")),
             sensor_mode=self._normalize_sensor_modes(raw_data.get("sensor_mode")),
             cdr_delay_start=self._normalize_cdr_delay_start(raw_data.get("cdr_delay_start"), mode),
@@ -67,6 +69,13 @@ class ConfigManager:
         if sensor_idx in cls._SENSOR_INDEXES:
             return sensor_idx
         return 1
+
+    @staticmethod
+    def _normalize_adb_device(raw_adb_device: object) -> str | None:
+        if raw_adb_device is None:
+            return None
+        adb_device = str(raw_adb_device).strip()
+        return adb_device or None
 
     @staticmethod
     def _normalize_sensor_modes(raw_sensor_mode: object) -> list[int] | None:

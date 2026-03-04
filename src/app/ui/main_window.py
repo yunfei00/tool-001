@@ -5,6 +5,7 @@ from pathlib import Path
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
+    QComboBox,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -17,6 +18,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..core.adb_device_service import AdbDeviceService
 from ..core.command_processor import CommandProcessor
 from ..core.config_manager import AppConfig, ConfigManager
 
@@ -31,8 +33,13 @@ class MainWindow(QMainWindow):
 
         self._config_manager = ConfigManager(config_path)
         self._command_processor = CommandProcessor()
+        self._adb_device_service = AdbDeviceService()
 
         self._mode = _SingleSelectCheckGroup(["manual", "auto", "dify"], default="manual")
+
+        self._adb_device_combo = QComboBox()
+        self._scan_adb_button = QPushButton("Scan ADB")
+        self._adb_devices: list[str] = []
 
         self._sensor_idx = _SingleSelectCheckGroup([str(value) for value in self._SENSOR_INDEX_OPTIONS], default="1")
 
@@ -79,6 +86,15 @@ class MainWindow(QMainWindow):
         config_group = QGroupBox("Configuration")
         self._config_form = QFormLayout()
         self._config_form.addRow("Mode", self._mode)
+
+        adb_device_row = QWidget()
+        adb_device_layout = QHBoxLayout()
+        adb_device_layout.setContentsMargins(0, 0, 0, 0)
+        adb_device_layout.addWidget(self._adb_device_combo)
+        adb_device_layout.addWidget(self._scan_adb_button)
+        adb_device_row.setLayout(adb_device_layout)
+        self._config_form.addRow("ADB Device", adb_device_row)
+
         self._config_form.addRow("Sensor idx", self._sensor_idx)
         self._sensor_mode_label = "Sensor mode"
         self._config_form.addRow(self._sensor_mode_label, self._sensor_mode)
@@ -133,6 +149,7 @@ class MainWindow(QMainWindow):
         self._save_button.clicked.connect(self.save_config)
         self._send_button.clicked.connect(self.send_command)
         self._command_input.returnPressed.connect(self.send_command)
+        self._scan_adb_button.clicked.connect(self.scan_adb_devices)
 
     def _collect_config(self) -> AppConfig:
         selected_mode = self._mode.selected_text
@@ -140,6 +157,7 @@ class MainWindow(QMainWindow):
         sensor_idx_value = int(self._sensor_idx.selected_text)
         return AppConfig(
             mode=selected_mode,
+            adb_device=self._selected_adb_device(),
             sensor_idx=sensor_idx_value,
             sensor_mode=sensor_modes,
             cdr_delay_start=self._cdr_delay_start.value(),
@@ -154,6 +172,7 @@ class MainWindow(QMainWindow):
 
     def _apply_config(self, config: AppConfig) -> None:
         self._mode.select(config.mode if config.mode in {"manual", "auto", "dify"} else "manual")
+        self._refresh_adb_devices(preferred=config.adb_device, should_log=False)
         self._sensor_idx.select(str(config.sensor_idx))
         if config.sensor_mode:
             self._sensor_mode.select(str(config.sensor_mode[0]))
@@ -172,6 +191,37 @@ class MainWindow(QMainWindow):
     def _parse_sensor_modes(self) -> list[int]:
         return [int(self._sensor_mode.selected_text)]
 
+    def _selected_adb_device(self) -> str | None:
+        current = self._adb_device_combo.currentText().strip()
+        if not current or current not in self._adb_devices:
+            return None
+        return current
+
+    def _refresh_adb_devices(self, *, preferred: str | None = None, should_log: bool = True) -> None:
+        devices, error = self._adb_device_service.list_devices()
+        self._adb_devices = devices
+        self._adb_device_combo.clear()
+
+        if devices:
+            self._adb_device_combo.addItems(devices)
+            self._adb_device_combo.setEnabled(True)
+            if preferred and preferred in devices:
+                self._adb_device_combo.setCurrentText(preferred)
+            if should_log:
+                self._append_log(f"Found {len(devices)} adb device(s).")
+            return
+
+        self._adb_device_combo.addItem("<no adb device>")
+        self._adb_device_combo.setEnabled(False)
+        if should_log:
+            if error:
+                self._append_log(f"ADB scan failed: {error}")
+            else:
+                self._append_log("No adb device found.")
+
+    def scan_adb_devices(self) -> None:
+        self._refresh_adb_devices(should_log=True)
+
     def _on_mode_changed(self, _button: QCheckBox) -> None:
         self._update_mode_dependent_fields(self._mode.selected_text)
 
@@ -189,44 +239,48 @@ class MainWindow(QMainWindow):
 
     def _refresh_param_details(self, cdr_max: int) -> None:
         lines = [
-            "1) sensor idx",
+            "1) adb device - 单步发送",
+            "- source: adb devices",
+            "- behavior: if multiple devices are found, user selects one manually",
+            "",
+            "2) sensor idx - 单步发送",
             "- type: single-select checkbox",
             "- allowed: 1, 2, 4, 8, 16",
             "",
-            "2) sensor mode",
+            "3) sensor mode - 单步发送",
             "- type: single-select checkbox",
             "- allowed: 0, 1, 2",
             "",
-            "3) cdr delay start",
+            "4) cdr delay start - 单步发送",
             f"- range: 0 ~ {cdr_max}",
             "- mode linkage: mode=dify -> 0 ~ 254, others -> 0 ~ 31",
             "",
-            "4) eq offset",
+            "5) eq offset - 单步发送",
             "- range: -31 ~ 31",
             "",
-            "5) eq dg0 enable",
+            "6) eq dg0 enable - 单步发送",
             "- type: single-select checkbox",
             "- allowed: 0, 1",
             "",
-            "6) eq sr0",
+            "7) eq sr0 - 单步发送",
             "- range: 0 ~ 15",
             "",
-            "7) eq dg1 enable",
+            "8) eq dg1 enable - 单步发送",
             "- type: single-select checkbox",
             "- allowed: 0, 1",
             "",
-            "8) eq sr1",
+            "9) eq sr1 - 单步发送",
             "- range: 0 ~ 15",
             "",
-            "9) eq bw",
+            "10) eq bw - 单步发送",
             "- type: single-select checkbox",
             "- allowed: 0, 1, 2, 3",
             "",
-            "10) mode",
+            "11) mode - 单步发送",
             "- type: single-select checkbox",
             "- allowed: manual, auto, dify",
             "",
-            "11) phy mode",
+            "12) phy mode - 单步发送",
             "- type: single-select checkbox",
             "- allowed: auto, master, slave",
         ]
@@ -249,6 +303,10 @@ class MainWindow(QMainWindow):
         command = self._command_input.text().strip()
         if not command:
             self._append_log("No command entered.")
+            return
+
+        if not self._selected_adb_device():
+            self._append_log("No adb device selected. Please scan and choose one device first.")
             return
 
         response = self._command_processor.send(command, self._collect_config())
