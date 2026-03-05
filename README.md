@@ -2,6 +2,7 @@
 测试工具。
 
 ## 运行环境要求
+- Windows 10/11（仅支持 Windows）
 - Python 3.11+
 - PySide6
 - `adb` 命令行工具（需可在终端直接调用）

@@ -1,14 +1,9 @@
 from __future__ import annotations
 
 import os
+import platform
 import sys
 from pathlib import Path
-
-from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QApplication
-
-from .ui.main_window import MainWindow
-
 
 def _project_root() -> Path:
     """Resolve project root for source run and PyInstaller frozen app."""
@@ -32,6 +27,20 @@ def _config_path() -> Path:
 
 
 def main() -> int:
+    if platform.system() != "Windows":
+        print(
+            "tool-001 目前仅支持在 Windows 上运行。"
+            "\n当前系统: "
+            f"{platform.system()}"
+            "\n请在 Windows 环境中启动本程序。"
+        )
+        return 1
+
+    from PySide6.QtCore import QTimer
+    from PySide6.QtWidgets import QApplication
+
+    from .ui.main_window import MainWindow
+
     app = QApplication(sys.argv)
 
     window = MainWindow(config_path=_config_path())
