@@ -19,9 +19,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..core.adb_device_service import AdbDeviceService
-from ..core.command_processor import CommandProcessor
-from ..core.config_manager import AppConfig, ConfigManager
+from app.core.adb_device_service import AdbDeviceService
+from app.core.command_processor import CommandProcessor
+from app.core.config_manager import AppConfig, ConfigManager
 
 
 class MainWindow(QMainWindow):
