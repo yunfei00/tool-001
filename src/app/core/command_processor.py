@@ -16,9 +16,9 @@ class CommandProcessor:
     _STEP_REGISTER_MAP = {
         "cdr delay": "CDR_DELAY",
         "eq offset": "EQ_OFFSET",
-        "eq dg0 enable": "EQ_DG0_ENABLE",
+        "eq dg0 enable": "EQ_DG0_EN",
         "eq sr0": "EQ_SR0",
-        "eq dg1 enable": "EQ_DG1_ENABLE",
+        "eq dg1 enable": "EQ_DG1_EN",
         "eq sr1": "EQ_SR1",
         "eq bw": "EQ_BW",
     }

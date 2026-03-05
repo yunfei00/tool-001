@@ -95,7 +95,7 @@ class MainWindow(QMainWindow):
         adb_device_row.setLayout(adb_device_layout)
         self._config_form.addRow("ADB Device", adb_device_row)
 
-        self._config_form.addRow("Sensor idx", self._with_step_send(self._sensor_idx, "sensor idx"))
+        self._config_form.addRow("Sensor idx", self._sensor_idx)
         self._sensor_mode_label = "Sensor mode"
         self._sensor_mode_row = self._with_step_send(self._sensor_mode, "sensor mode")
         self._config_form.addRow(self._sensor_mode_label, self._sensor_mode_row)
