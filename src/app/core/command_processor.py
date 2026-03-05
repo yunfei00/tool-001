@@ -3,9 +3,9 @@ from __future__ import annotations
 from datetime import datetime
 import shlex
 
-from .config_manager import AppConfig
-from .eye_scan_module import EyeScanCommand, EyeScanModule
-from .seninf_path_resolver import SeninfPathResolver
+from app.core.config_manager import AppConfig
+from app.core.eye_scan_module import EyeScanCommand, EyeScanModule
+from app.core.seninf_path_resolver import SeninfPathResolver
 
 
 class CommandProcessor:
