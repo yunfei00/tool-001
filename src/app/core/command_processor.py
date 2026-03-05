@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from datetime import datetime
 import shlex
-import subprocess
-import time
 
 from .config_manager import AppConfig
 from .eye_scan_module import EyeScanCommand, EyeScanModule
@@ -85,10 +83,9 @@ class CommandProcessor:
         timestamp = datetime.now().strftime("%H:%M:%S")
         driver_sensor_idx = self._map_dts_idx(sensor_idx)
 
-        with _SentestSession(adb_device, sensor_idx, sensor_mode):
-            eye = EyeScanModule(serial=adb_device, seninf_path=seninf_path)
-            eye_command = self._build_eye_command(command, config, driver_sensor_idx)
-            result = eye.execute(eye_command)
+        eye = EyeScanModule(serial=adb_device, seninf_path=seninf_path)
+        eye_command = self._build_eye_command(command, config, driver_sensor_idx)
+        result = eye.execute(eye_command)
 
         state = "SUCCESS" if result.ok else "FAIL"
         return (
@@ -139,39 +136,3 @@ class CommandProcessor:
     @staticmethod
     def _map_dts_idx(sensor_idx: int) -> int:
         return sensor_idx.bit_length() - 1
-
-
-class _SentestSession:
-    def __init__(self, serial: str, sensor_idx: int, sensor_mode: int) -> None:
-        self._serial = serial
-        self._sensor_idx = sensor_idx
-        self._sensor_mode = sensor_mode
-        self._proc: subprocess.Popen[bytes] | None = None
-
-    def __enter__(self) -> _SentestSession:
-        cmd = (
-            f'adb -s {self._serial} shell "sentest_v412 '
-            f'{self._sensor_idx} {self._sensor_mode}"'
-        )
-        self._proc = subprocess.Popen(
-            cmd,
-            shell=True,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-        time.sleep(1)
-        return self
-
-    def __exit__(self, exc_type, exc, tb) -> None:  # noqa: ANN001
-        if self._proc is None:
-            return
-
-        try:
-            if self._proc.stdin is not None:
-                self._proc.stdin.write(b"\n")
-                self._proc.stdin.flush()
-            self._proc.communicate(timeout=3)
-        except subprocess.TimeoutExpired:
-            self._proc.kill()
-            self._proc.communicate()
