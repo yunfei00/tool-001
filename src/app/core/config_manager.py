@@ -19,7 +19,6 @@ class AppConfig:
     eq_dg1_enable: int = 0
     eq_sr1: int = 0
     eq_bw: int = 0
-    phy_mode: str = "auto"
 
 
 class ConfigManager:
@@ -51,7 +50,6 @@ class ConfigManager:
             eq_dg1_enable=self._normalize_integer(raw_data.get("eq_dg1_enable"), minimum=0, maximum=1, default=0),
             eq_sr1=self._normalize_integer(raw_data.get("eq_sr1"), minimum=0, maximum=15, default=0),
             eq_bw=self._normalize_integer(raw_data.get("eq_bw"), minimum=0, maximum=3, default=0),
-            phy_mode=str(raw_data.get("phy_mode", "auto")),
         )
 
     def save(self, config: AppConfig) -> None:
