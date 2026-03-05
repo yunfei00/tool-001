@@ -49,7 +49,7 @@ class MainWindow(QMainWindow):
 
         self._sensor_idx = _SingleSelectCheckGroup([str(value) for value in self._SENSOR_INDEX_OPTIONS], default="1")
 
-        self._sensor_mode = _SingleSelectCheckGroup(["0", "1", "2"], default="0")
+        self._sensor_mode = _MultiSelectCheckGroup(["0", "1", "2"], default=["0"])
 
         self._is_dphy = QCheckBox("DPHY")
 
@@ -184,9 +184,9 @@ class MainWindow(QMainWindow):
         self._is_dphy.setChecked(config.is_dphy)
         self._sensor_idx.select(str(config.sensor_idx))
         if config.sensor_mode:
-            self._sensor_mode.select(str(config.sensor_mode[0]))
+            self._sensor_mode.select_many([str(value) for value in config.sensor_mode])
         else:
-            self._sensor_mode.select("0")
+            self._sensor_mode.select_many(["0"])
         self._cdr_delay_start.setValue(config.cdr_delay_start)
         self._eq_offset.setValue(config.eq_offset)
         self._eq_dg0_enable.select(str(config.eq_dg0_enable))
@@ -197,7 +197,8 @@ class MainWindow(QMainWindow):
         self._update_mode_dependent_fields(self._mode.selected_text)
 
     def _parse_sensor_modes(self) -> list[int]:
-        return [int(self._sensor_mode.selected_text)]
+        selected_modes = [int(value) for value in self._sensor_mode.selected_texts]
+        return selected_modes or [0]
 
     def _selected_adb_device(self) -> str | None:
         current = self._adb_device_combo.currentText().strip()
@@ -264,7 +265,7 @@ class MainWindow(QMainWindow):
             "- allowed: 1, 2, 4, 8, 16",
             "",
             "3) sensor mode",
-            "- type: single-select checkbox",
+            "- type: multi-select checkbox",
             "- allowed: 0, 1, 2",
             "",
             "4) cdr delay",
@@ -430,3 +431,34 @@ class _SingleSelectCheckGroup(QWidget):
         if target is None:
             target = next(iter(self._checks.values()))
         target.setChecked(True)
+
+
+class _MultiSelectCheckGroup(QWidget):
+    def __init__(self, options: list[str], *, default: list[str] | None = None) -> None:
+        super().__init__()
+        layout = QHBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        self._checks: dict[str, QCheckBox] = {}
+        for option in options:
+            check = QCheckBox(option)
+            self._checks[option] = check
+            layout.addWidget(check)
+        layout.addStretch(1)
+        self.setLayout(layout)
+
+        initial = default or options[:1]
+        self.select_many(initial)
+
+    @property
+    def selected_texts(self) -> list[str]:
+        return [option for option, check in self._checks.items() if check.isChecked()]
+
+    def select_many(self, values: list[str]) -> None:
+        matched = set(values) & set(self._checks)
+        if not matched and self._checks:
+            matched = {next(iter(self._checks))}
+
+        for option, check in self._checks.items():
+            check.setChecked(option in matched)
