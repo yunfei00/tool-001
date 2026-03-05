@@ -88,7 +88,8 @@ class CommandProcessor:
         state = "SUCCESS" if result.ok else "FAIL"
         return (
             f"[{timestamp}] serial={adb_device} sensor_idx={sensor_idx} sensor_mode={sensor_mode} "
-            f"register={eye_command.register} value={eye_command.value} {state}: {result.raw_output.strip()}"
+            f"register={eye_command.register} value={eye_command.value} adb_cmd={result.adb_command} "
+            f"{state}: {result.raw_output.strip()}"
         )
 
     def _build_eye_command(self, command: str, config: AppConfig, driver_sensor_idx: int) -> EyeScanCommand:
