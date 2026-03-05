@@ -11,11 +11,23 @@ class SeninfPathResolver:
         self._adb_bin = adb_bin
 
     def resolve(self) -> str:
-        find_result = subprocess.getoutput(
-            f'{self._adb_bin} -s {self._serial} shell '
-            '"cd /sys/devices/platform/; find . -name \\"*seninf*top\\" -type d"'
-        ).strip()
+        completed = subprocess.run(
+            [
+                self._adb_bin,
+                "-s",
+                self._serial,
+                "shell",
+                'cd /sys/devices/platform/; find . -name "*seninf*top" -type d',
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        find_result = completed.stdout.strip()
         if not find_result:
+            stderr = completed.stderr.strip()
+            if stderr:
+                raise RuntimeError(f"Unable to locate seninf top path from device: {stderr}")
             raise RuntimeError("Unable to locate seninf top path from device.")
 
         # adb shell returns paths like './xxxx', normalize to absolute path.
