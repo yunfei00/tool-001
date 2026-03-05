@@ -21,9 +21,7 @@ class CommandProcessor:
         "eq dg1 enable": "EQ_DG1_ENABLE",
         "eq sr1": "EQ_SR1",
         "eq bw": "EQ_BW",
-        "phy mode": "PHY_MODE",
     }
-    _PHY_MODE_TO_VALUE = {"auto": 0, "master": 1, "slave": 2}
 
     def send(self, command: str, config: AppConfig) -> str:
         timestamp = datetime.now().strftime("%H:%M:%S")
@@ -129,8 +127,6 @@ class CommandProcessor:
             return config.eq_sr1
         if step == "eq bw":
             return config.eq_bw
-        if step == "phy mode":
-            return self._PHY_MODE_TO_VALUE[config.phy_mode]
         return None
 
     @staticmethod

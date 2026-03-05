@@ -65,8 +65,6 @@ class MainWindow(QMainWindow):
 
         self._eq_bw = _SingleSelectCheckGroup(["0", "1", "2", "3"], default="0")
 
-        self._phy_mode = _SingleSelectCheckGroup(["auto", "master", "slave"], default="auto")
-
         self._command_input = QLineEdit()
         self._command_input.setPlaceholderText("Enter debug command...")
 
@@ -87,7 +85,7 @@ class MainWindow(QMainWindow):
     def _build_ui(self) -> None:
         config_group = QGroupBox("Configuration")
         self._config_form = QFormLayout()
-        self._config_form.addRow("模式", self._with_step_send(self._mode, "mode"))
+        self._config_form.addRow("模式", self._mode)
 
         adb_device_row = QWidget()
         adb_device_layout = QHBoxLayout()
@@ -95,21 +93,19 @@ class MainWindow(QMainWindow):
         adb_device_layout.addWidget(self._adb_device_combo)
         adb_device_layout.addWidget(self._scan_adb_button)
         adb_device_row.setLayout(adb_device_layout)
-        self._config_form.addRow("ADB Device", self._with_step_send(adb_device_row, "adb device"))
+        self._config_form.addRow("ADB Device", adb_device_row)
 
         self._config_form.addRow("Sensor idx", self._with_step_send(self._sensor_idx, "sensor idx"))
         self._sensor_mode_label = "Sensor mode"
         self._sensor_mode_row = self._with_step_send(self._sensor_mode, "sensor mode")
         self._config_form.addRow(self._sensor_mode_label, self._sensor_mode_row)
-        self._config_form.addRow("DPHY", self._is_dphy)
-        self._config_form.addRow("CDR delay", self._with_step_send(self._cdr_delay_start, "cdr delay"))
+        self._config_form.addRow("CDR delay", self._with_step_send(self._cdr_delay_start, "cdr delay", self._is_dphy))
         self._config_form.addRow("EQ offset", self._with_step_send(self._eq_offset, "eq offset"))
         self._config_form.addRow("EQ dg0 enable", self._with_step_send(self._eq_dg0_enable, "eq dg0 enable"))
         self._config_form.addRow("EQ sr0", self._with_step_send(self._eq_sr0, "eq sr0"))
         self._config_form.addRow("EQ dg1 enable", self._with_step_send(self._eq_dg1_enable, "eq dg1 enable"))
         self._config_form.addRow("EQ sr1", self._with_step_send(self._eq_sr1, "eq sr1"))
         self._config_form.addRow("EQ bw", self._with_step_send(self._eq_bw, "eq bw"))
-        self._config_form.addRow("Phy mode", self._with_step_send(self._phy_mode, "phy mode"))
         config_group.setLayout(self._config_form)
 
         detail_group = QGroupBox("Parameter Details")
@@ -173,7 +169,6 @@ class MainWindow(QMainWindow):
             eq_dg1_enable=int(self._eq_dg1_enable.selected_text),
             eq_sr1=self._eq_sr1.value(),
             eq_bw=int(self._eq_bw.selected_text),
-            phy_mode=self._phy_mode.selected_text,
         )
 
     def _apply_config(self, config: AppConfig) -> None:
@@ -192,7 +187,6 @@ class MainWindow(QMainWindow):
         self._eq_dg1_enable.select(str(config.eq_dg1_enable))
         self._eq_sr1.setValue(config.eq_sr1)
         self._eq_bw.select(str(config.eq_bw))
-        self._phy_mode.select(config.phy_mode)
         self._update_mode_dependent_fields(self._mode.selected_text)
 
     def _parse_sensor_modes(self) -> list[int]:
@@ -264,52 +258,47 @@ class MainWindow(QMainWindow):
             "- type: single-select checkbox",
             "- allowed: 0, 1, 2",
             "",
-            "4) dphy",
-            "- type: checkbox",
-            "- unchecked: CPHY",
-            "- checked: DPHY",
-            "",
-            "5) cdr delay",
+            "4) cdr delay",
             f"- range: 0 ~ {cdr_max}",
             "- phy linkage: CPHY -> 0 ~ 31, DPHY -> 0 ~ 254",
+            "- includes DPHY checkbox: unchecked=CPHY, checked=DPHY",
             "",
-            "6) eq offset",
+            "5) eq offset",
             "- range: -31 ~ 31",
             "",
-            "7) eq dg0 enable",
+            "6) eq dg0 enable",
             "- type: single-select checkbox",
             "- allowed: 0, 1",
             "",
-            "8) eq sr0",
+            "7) eq sr0",
             "- range: 0 ~ 15",
             "",
-            "9) eq dg1 enable",
+            "8) eq dg1 enable",
             "- type: single-select checkbox",
             "- allowed: 0, 1",
             "",
-            "10) eq sr1",
+            "9) eq sr1",
             "- range: 0 ~ 15",
             "",
-            "11) eq bw",
+            "10) eq bw",
             "- type: single-select checkbox",
             "- allowed: 0, 1, 2, 3",
             "",
-            "12) mode",
+            "11) mode",
             "- type: single-select checkbox",
             "- allowed: 单步调试(manual), 自动化测试(auto)",
-            "",
-            "13) phy mode",
-            "- type: single-select checkbox",
-            "- allowed: auto, master, slave",
         ]
         self._param_detail.setPlainText("\n".join(lines))
 
-    def _with_step_send(self, field: QWidget, command: str) -> QWidget:
+    def _with_step_send(self, field: QWidget, command: str, extra_widget: QWidget | None = None) -> QWidget:
         row = QWidget()
         layout = QHBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(field)
+        if extra_widget is not None:
+            layout.addWidget(extra_widget)
         step_send_button = QPushButton("单步发送")
+        step_send_button.setFixedWidth(88)
         step_send_button.clicked.connect(lambda: self._send_single_step(command))
         layout.addWidget(step_send_button)
         row.setLayout(layout)
