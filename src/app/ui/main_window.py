@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
+    QLabel,
     QLineEdit,
     QMainWindow,
     QPushButton,
@@ -36,6 +37,11 @@ class MainWindow(QMainWindow):
         self._adb_device_service = AdbDeviceService()
 
         self._mode = _ModeSelectCheckGroup(default="manual")
+        self._manual_mode_notice = QLabel(
+            "参数写入和测试过程中，请始终保持 camera 工作。熄屏或退出会导致写入的参数擦除。"
+        )
+        self._manual_mode_notice.setWordWrap(True)
+        self._manual_mode_notice.setStyleSheet("color: #d32f2f; font-size: 18px; font-weight: 700;")
 
         self._adb_device_combo = QComboBox()
         self._scan_adb_button = QPushButton("Scan ADB")
@@ -86,6 +92,7 @@ class MainWindow(QMainWindow):
         config_group = QGroupBox("Configuration")
         self._config_form = QFormLayout()
         self._config_form.addRow("模式", self._mode)
+        self._config_form.addRow("", self._manual_mode_notice)
 
         adb_device_row = QWidget()
         adb_device_layout = QHBoxLayout()
