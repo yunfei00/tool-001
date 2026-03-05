@@ -72,7 +72,7 @@ class MainWindow(QMainWindow):
         self._eq_bw = _SingleSelectCheckGroup(["0", "1", "2", "3"], default="0")
 
         self._command_input = QLineEdit()
-        self._command_input.setPlaceholderText("Enter debug command...")
+        self._command_input.setPlaceholderText("Manual: 输入寄存器命令；Auto: 可选输入参数列表(逗号分隔)")
 
         self._send_button = QPushButton("Send")
         self._load_button = QPushButton("Load Config")
@@ -335,15 +335,23 @@ class MainWindow(QMainWindow):
 
     def send_command(self) -> None:
         command = self._command_input.text().strip()
-        if not command:
-            self._append_log("No command entered.")
-            return
 
         if not self._selected_adb_device():
             self._append_log("No adb device selected. Please scan and choose one device first.")
             return
 
-        response = self._command_processor.send(command, self._collect_config())
+        config = self._collect_config()
+        if config.mode == "auto":
+            response = self._command_processor.run_automated_test(config, command)
+            self._append_log(response)
+            self._command_input.clear()
+            return
+
+        if not command:
+            self._append_log("No command entered.")
+            return
+
+        response = self._command_processor.send(command, config)
         self._append_log(response)
         self._command_input.clear()
 

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime
+from itertools import product
+from pathlib import Path
 import shlex
+import csv
 
 from app.core.config_manager import AppConfig
 from app.core.eye_scan_module import EyeScanCommand, EyeScanModule
@@ -22,6 +25,15 @@ class CommandProcessor:
         "eq sr1": "EQ_SR1",
         "eq bw": "EQ_BW",
     }
+    _DEFAULT_AUTO_STEPS = (
+        "cdr delay",
+        "eq offset",
+        "eq dg0 enable",
+        "eq sr0",
+        "eq dg1 enable",
+        "eq sr1",
+        "eq bw",
+    )
 
     def send(self, command: str, config: AppConfig) -> str:
         timestamp = datetime.now().strftime("%H:%M:%S")
@@ -55,6 +67,92 @@ class CommandProcessor:
             lines.append(line)
 
         return "\n".join(lines)
+
+    def run_automated_test(self, config: AppConfig, step_text: str = "") -> str:
+        steps = self._parse_auto_steps(step_text)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_dir = Path("configs") / "auto_test_outputs"
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        if set(steps) == {"cdr delay", "eq offset"} and len(steps) == 2:
+            cdr_path = output_dir / f"cdr_delay_{timestamp}.txt"
+            eq_path = output_dir / f"eq_offset_{timestamp}.txt"
+            self._run_single_param_sweep("cdr delay", config, cdr_path)
+            self._run_single_param_sweep("eq offset", config, eq_path)
+            return (
+                "自动化测试完成。\n"
+                f"cdr delay 输出文件: {cdr_path}\n"
+                f"eq offset 输出文件: {eq_path}"
+            )
+
+        csv_path = output_dir / f"multi_param_{timestamp}.csv"
+        row_count = self._run_multi_param_sweep(steps, config, csv_path)
+        return f"自动化测试完成。共 {row_count} 行，CSV 输出: {csv_path}"
+
+    def _parse_auto_steps(self, step_text: str) -> list[str]:
+        if not step_text.strip():
+            return list(self._DEFAULT_AUTO_STEPS)
+        parts = [part.strip().lower() for part in step_text.replace(";", ",").split(",")]
+        steps = [step for step in parts if step in self._STEP_REGISTER_MAP]
+        return steps or list(self._DEFAULT_AUTO_STEPS)
+
+    def _run_single_param_sweep(self, step: str, config: AppConfig, output_path: Path) -> None:
+        with output_path.open("w", encoding="utf-8") as handle:
+            for value in self._step_candidates(step, config):
+                run_config = self._config_with_step_value(config, step, value)
+                result = self.send(step, run_config)
+                handle.write(f"{step}={value}\n{result}\n\n")
+
+    def _run_multi_param_sweep(self, steps: list[str], config: AppConfig, csv_path: Path) -> int:
+        candidates = [self._step_candidates(step, config) for step in steps]
+        header = [*steps, "final_result"]
+        count = 0
+        with csv_path.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(header)
+            for values in product(*candidates):
+                run_config = config
+                final_result = ""
+                for step, value in zip(steps, values):
+                    run_config = self._config_with_step_value(run_config, step, value)
+                    final_result = self.send(step, run_config)
+                writer.writerow([*values, final_result])
+                count += 1
+        return count
+
+    def _step_candidates(self, step: str, config: AppConfig) -> list[int]:
+        if step == "cdr delay":
+            cdr_max = 254 if config.is_dphy else 31
+            return list(range(0, cdr_max + 1))
+        if step == "eq offset":
+            return list(range(-31, 32))
+        if step == "eq dg0 enable":
+            return [0, 1]
+        if step == "eq sr0":
+            return list(range(0, 16))
+        if step == "eq dg1 enable":
+            return [0, 1]
+        if step == "eq sr1":
+            return list(range(0, 16))
+        if step == "eq bw":
+            return [0, 1, 2, 3]
+        return [0]
+
+    def _config_with_step_value(self, config: AppConfig, step: str, value: int) -> AppConfig:
+        return AppConfig(
+            mode=config.mode,
+            adb_device=config.adb_device,
+            is_dphy=config.is_dphy,
+            sensor_idx=config.sensor_idx,
+            sensor_mode=config.sensor_mode,
+            cdr_delay_start=value if step == "cdr delay" else config.cdr_delay_start,
+            eq_offset=value if step == "eq offset" else config.eq_offset,
+            eq_dg0_enable=value if step == "eq dg0 enable" else config.eq_dg0_enable,
+            eq_sr0=value if step == "eq sr0" else config.eq_sr0,
+            eq_dg1_enable=value if step == "eq dg1 enable" else config.eq_dg1_enable,
+            eq_sr1=value if step == "eq sr1" else config.eq_sr1,
+            eq_bw=value if step == "eq bw" else config.eq_bw,
+        )
 
     def _build_targets(self, config: AppConfig) -> list[tuple[int, int]]:
         if config.mode != "auto":
