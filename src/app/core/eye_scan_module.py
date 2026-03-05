@@ -32,6 +32,7 @@ class EyeScanResult:
     command: EyeScanCommand
     ok: bool
     raw_output: str
+    adb_command: str
 
     @property
     def readback_hex_values(self) -> list[int]:
@@ -61,7 +62,7 @@ class EyeScanModule:
         output = subprocess.getoutput(adb_cmd)
 
         ok = SUCCESS_FLAG in output and FAIL_FLAG not in output
-        return EyeScanResult(command=command, ok=ok, raw_output=output)
+        return EyeScanResult(command=command, ok=ok, raw_output=output, adb_command=adb_cmd)
 
     def execute_and_compare_readback(
         self,
