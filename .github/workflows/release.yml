@@ -30,7 +30,7 @@ jobs:
 
       - name: Build Windows executable with PyInstaller
         run: |
-          pyinstaller src/app/main.py --name tool-001 --onefile --windowed --paths src
+          pyinstaller src/app/main.py --name tool-001 --onefile --paths src
 
       - name: Upload workflow artifact (EXE)
         uses: actions/upload-artifact@v4
