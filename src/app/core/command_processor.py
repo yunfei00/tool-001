@@ -5,6 +5,7 @@ from itertools import product
 from pathlib import Path
 import shlex
 import csv
+import subprocess
 
 from app.core.config_manager import AppConfig
 from app.core.eye_scan_module import EyeScanCommand, EyeScanModule
@@ -34,6 +35,8 @@ class CommandProcessor:
         "eq sr1",
         "eq bw",
     )
+    _SENTEST_LOCAL_PATH = Path("tool") / "sentest_v412"
+    _SENTEST_REMOTE_PATH = "/data/local/tmp/sentest_v412"
 
     def send(self, command: str, config: AppConfig) -> str:
         timestamp = datetime.now().strftime("%H:%M:%S")
@@ -51,6 +54,7 @@ class CommandProcessor:
 
         for sensor_idx, sensor_mode in targets:
             try:
+                self._start_stream(adb_device=adb_device, sensor_idx=sensor_idx, sensor_mode=sensor_mode)
                 line = self._send_to_target(
                     command=command,
                     config=config,
@@ -67,6 +71,62 @@ class CommandProcessor:
             lines.append(line)
 
         return "\n".join(lines)
+
+    def _start_stream(self, *, adb_device: str, sensor_idx: int, sensor_mode: int) -> None:
+        sentest_path = self._SENTEST_LOCAL_PATH
+        if not sentest_path.exists():
+            raise RuntimeError(f"Missing stream tool: {sentest_path}")
+
+        push_cmd = ["adb", "-s", adb_device, "push", str(sentest_path), self._SENTEST_REMOTE_PATH]
+        push_result = subprocess.run(push_cmd, check=False, capture_output=True, text=True)
+        if push_result.returncode != 0:
+            output = (push_result.stdout or "") + (push_result.stderr or "")
+            raise RuntimeError(f"Push sentest_v412 failed: {output.strip()}")
+
+        chmod_cmd = ["adb", "-s", adb_device, "shell", f"chmod 755 {self._SENTEST_REMOTE_PATH}"]
+        subprocess.run(chmod_cmd, check=False, capture_output=True, text=True)
+
+        errors: list[str] = []
+        for stream_cmd in self._build_stream_commands(
+            adb_device=adb_device,
+            sensor_idx=sensor_idx,
+            sensor_mode=sensor_mode,
+        ):
+            result = subprocess.run(stream_cmd, check=False, capture_output=True, text=True)
+            if result.returncode == 0:
+                return
+            output = ((result.stdout or "") + (result.stderr or "")).strip()
+            errors.append(f"{' '.join(stream_cmd)} -> {output}")
+
+        raise RuntimeError(
+            "Start stream failed: sentest_v412 command returned non-zero. "
+            + " | ".join(errors)
+        )
+
+    def _build_stream_commands(self, *, adb_device: str, sensor_idx: int, sensor_mode: int) -> list[list[str]]:
+        return [
+            [
+                "adb",
+                "-s",
+                adb_device,
+                "shell",
+                f"{self._SENTEST_REMOTE_PATH} --sensor-idx {sensor_idx} --sensor-mode {sensor_mode} --start-stream",
+            ],
+            [
+                "adb",
+                "-s",
+                adb_device,
+                "shell",
+                f"{self._SENTEST_REMOTE_PATH} {sensor_idx} {sensor_mode}",
+            ],
+            [
+                "adb",
+                "-s",
+                adb_device,
+                "shell",
+                f"{self._SENTEST_REMOTE_PATH}",
+            ],
+        ]
 
     def run_automated_test(self, config: AppConfig, step_text: str = "") -> str:
         steps = self._parse_auto_steps(step_text)
