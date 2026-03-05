@@ -238,6 +238,8 @@ class MainWindow(QMainWindow):
         self._update_mode_dependent_fields(self._mode.selected_text)
 
     def _update_mode_dependent_fields(self, mode: str) -> None:
+        self._manual_mode_notice.setVisible(mode == "manual")
+
         has_sensor_mode = mode == "auto"
         self._sensor_mode_row.setVisible(has_sensor_mode)
         sensor_mode_label = self._config_form.labelForField(self._sensor_mode_row)
