@@ -35,7 +35,7 @@ class MainWindow(QMainWindow):
         self._command_processor = CommandProcessor()
         self._adb_device_service = AdbDeviceService()
 
-        self._mode = _SingleSelectCheckGroup(["manual", "auto", "dify"], default="manual")
+        self._mode = _ModeSelectCheckGroup(default="manual")
 
         self._adb_device_combo = QComboBox()
         self._scan_adb_button = QPushButton("Scan ADB")
@@ -44,6 +44,8 @@ class MainWindow(QMainWindow):
         self._sensor_idx = _SingleSelectCheckGroup([str(value) for value in self._SENSOR_INDEX_OPTIONS], default="1")
 
         self._sensor_mode = _SingleSelectCheckGroup(["0", "1", "2"], default="0")
+
+        self._is_dphy = QCheckBox("DPHY")
 
         self._cdr_delay_start = QSpinBox()
         self._cdr_delay_start.setRange(0, 31)
@@ -85,7 +87,7 @@ class MainWindow(QMainWindow):
     def _build_ui(self) -> None:
         config_group = QGroupBox("Configuration")
         self._config_form = QFormLayout()
-        self._config_form.addRow("Mode", self._with_step_send(self._mode, "mode"))
+        self._config_form.addRow("模式", self._with_step_send(self._mode, "mode"))
 
         adb_device_row = QWidget()
         adb_device_layout = QHBoxLayout()
@@ -99,6 +101,7 @@ class MainWindow(QMainWindow):
         self._sensor_mode_label = "Sensor mode"
         self._sensor_mode_row = self._with_step_send(self._sensor_mode, "sensor mode")
         self._config_form.addRow(self._sensor_mode_label, self._sensor_mode_row)
+        self._config_form.addRow("DPHY", self._is_dphy)
         self._config_form.addRow("CDR delay", self._with_step_send(self._cdr_delay_start, "cdr delay"))
         self._config_form.addRow("EQ offset", self._with_step_send(self._eq_offset, "eq offset"))
         self._config_form.addRow("EQ dg0 enable", self._with_step_send(self._eq_dg0_enable, "eq dg0 enable"))
@@ -146,6 +149,7 @@ class MainWindow(QMainWindow):
 
     def _bind_events(self) -> None:
         self._mode.selection_changed.connect(self._on_mode_changed)
+        self._is_dphy.toggled.connect(self._on_dphy_toggled)
         self._load_button.clicked.connect(self.load_config)
         self._save_button.clicked.connect(self.save_config)
         self._send_button.clicked.connect(self.send_command)
@@ -154,11 +158,12 @@ class MainWindow(QMainWindow):
 
     def _collect_config(self) -> AppConfig:
         selected_mode = self._mode.selected_text
-        sensor_modes = self._parse_sensor_modes() if selected_mode in {"auto", "dify"} else None
+        sensor_modes = self._parse_sensor_modes() if selected_mode == "auto" else None
         sensor_idx_value = int(self._sensor_idx.selected_text)
         return AppConfig(
             mode=selected_mode,
             adb_device=self._selected_adb_device(),
+            is_dphy=self._is_dphy.isChecked(),
             sensor_idx=sensor_idx_value,
             sensor_mode=sensor_modes,
             cdr_delay_start=self._cdr_delay_start.value(),
@@ -172,8 +177,9 @@ class MainWindow(QMainWindow):
         )
 
     def _apply_config(self, config: AppConfig) -> None:
-        self._mode.select(config.mode if config.mode in {"manual", "auto", "dify"} else "manual")
+        self._mode.select(config.mode if config.mode in {"manual", "auto"} else "manual")
         self._refresh_adb_devices(preferred=config.adb_device, should_log=False)
+        self._is_dphy.setChecked(config.is_dphy)
         self._sensor_idx.select(str(config.sensor_idx))
         if config.sensor_mode:
             self._sensor_mode.select(str(config.sensor_mode[0]))
@@ -226,15 +232,21 @@ class MainWindow(QMainWindow):
     def _on_mode_changed(self, _button: QCheckBox) -> None:
         self._update_mode_dependent_fields(self._mode.selected_text)
 
+
+    def _on_dphy_toggled(self, _checked: bool) -> None:
+        self._update_mode_dependent_fields(self._mode.selected_text)
+
     def _update_mode_dependent_fields(self, mode: str) -> None:
-        has_sensor_mode = mode in {"auto", "dify"}
+        has_sensor_mode = mode == "auto"
         self._sensor_mode_row.setVisible(has_sensor_mode)
         sensor_mode_label = self._config_form.labelForField(self._sensor_mode_row)
         if sensor_mode_label is not None:
             sensor_mode_label.setVisible(has_sensor_mode)
 
-        cdr_max = 254 if mode == "dify" else 31
+        cdr_max = 254 if self._is_dphy.isChecked() else 31
         self._cdr_delay_start.setMaximum(cdr_max)
+        if self._cdr_delay_start.value() > cdr_max:
+            self._cdr_delay_start.setValue(cdr_max)
 
         self._refresh_param_details(cdr_max)
 
@@ -252,36 +264,41 @@ class MainWindow(QMainWindow):
             "- type: single-select checkbox",
             "- allowed: 0, 1, 2",
             "",
-            "4) cdr delay",
-            f"- range: 0 ~ {cdr_max}",
-            "- mode linkage: mode=dify -> 0 ~ 254, others -> 0 ~ 31",
+            "4) dphy",
+            "- type: checkbox",
+            "- unchecked: CPHY",
+            "- checked: DPHY",
             "",
-            "5) eq offset",
+            "5) cdr delay",
+            f"- range: 0 ~ {cdr_max}",
+            "- phy linkage: CPHY -> 0 ~ 31, DPHY -> 0 ~ 254",
+            "",
+            "6) eq offset",
             "- range: -31 ~ 31",
             "",
-            "6) eq dg0 enable",
+            "7) eq dg0 enable",
             "- type: single-select checkbox",
             "- allowed: 0, 1",
             "",
-            "7) eq sr0",
+            "8) eq sr0",
             "- range: 0 ~ 15",
             "",
-            "8) eq dg1 enable",
+            "9) eq dg1 enable",
             "- type: single-select checkbox",
             "- allowed: 0, 1",
             "",
-            "9) eq sr1",
+            "10) eq sr1",
             "- range: 0 ~ 15",
             "",
-            "10) eq bw",
+            "11) eq bw",
             "- type: single-select checkbox",
             "- allowed: 0, 1, 2, 3",
             "",
-            "11) mode",
+            "12) mode",
             "- type: single-select checkbox",
-            "- allowed: manual, auto, dify",
+            "- allowed: 单步调试(manual), 自动化测试(auto)",
             "",
-            "12) phy mode",
+            "13) phy mode",
             "- type: single-select checkbox",
             "- allowed: auto, master, slave",
         ]
@@ -331,6 +348,45 @@ class MainWindow(QMainWindow):
         response = self._command_processor.send(command, self._collect_config())
         self._append_log(response)
         self._command_input.clear()
+
+
+class _ModeSelectCheckGroup(QWidget):
+    _LABEL_TO_VALUE = {"单步调试": "manual", "自动化测试": "auto"}
+    _VALUE_TO_LABEL = {value: label for label, value in _LABEL_TO_VALUE.items()}
+
+    def __init__(self, *, default: str = "manual") -> None:
+        super().__init__()
+        self._button_group = QButtonGroup(self)
+        self._button_group.setExclusive(True)
+
+        layout = QHBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        self._checks: dict[str, QCheckBox] = {}
+        for label in self._LABEL_TO_VALUE:
+            check = QCheckBox(label)
+            self._button_group.addButton(check)
+            self._checks[label] = check
+            layout.addWidget(check)
+        layout.addStretch(1)
+        self.setLayout(layout)
+
+        self.select(default)
+
+    @property
+    def selected_text(self) -> str:
+        checked = self._button_group.checkedButton()
+        if checked is None:
+            return "manual"
+        return self._LABEL_TO_VALUE[checked.text()]
+
+    @property
+    def selection_changed(self):
+        return self._button_group.buttonClicked
+
+    def select(self, value: str) -> None:
+        label = self._VALUE_TO_LABEL.get(value, "单步调试")
+        self._checks[label].setChecked(True)
 
 
 class _SingleSelectCheckGroup(QWidget):

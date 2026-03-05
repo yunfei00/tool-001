@@ -8,5 +8,6 @@
   "eq_dg1_enable": 0,
   "eq_sr1": 0,
   "eq_bw": 0,
-  "phy_mode": "auto"
+  "phy_mode": "auto",
+  "is_dphy": false
 }
