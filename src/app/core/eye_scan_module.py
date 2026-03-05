@@ -55,13 +55,17 @@ class EyeScanModule:
 
     def execute(self, command: EyeScanCommand) -> EyeScanResult:
         payload = self._build_eye_scan_payload(command)
-        adb_cmd = (
-            f'{self._adb_bin} -s {self._serial} shell "cd {self._seninf_path}; '
-            f'echo {payload} > debug_ops ; cat debug_ops"'
+        remote_cmd = f"cd {self._seninf_path}; echo {payload} > debug_ops ; cat debug_ops"
+        completed = subprocess.run(
+            [self._adb_bin, "-s", self._serial, "shell", remote_cmd],
+            check=False,
+            capture_output=True,
+            text=True,
         )
-        output = subprocess.getoutput(adb_cmd)
+        output = (completed.stdout or "") + (completed.stderr or "")
 
         ok = SUCCESS_FLAG in output and FAIL_FLAG not in output
+        adb_cmd = " ".join([self._adb_bin, "-s", self._serial, "shell", remote_cmd])
         return EyeScanResult(command=command, ok=ok, raw_output=output, adb_command=adb_cmd)
 
     def execute_and_compare_readback(
