@@ -9,6 +9,7 @@ import json
 class AppConfig:
     mode: str = "manual"
     adb_device: str | None = None
+    is_dphy: bool = False
     sensor_idx: int = 1
     sensor_mode: list[int] | None = None
     cdr_delay_start: int = 0
@@ -35,12 +36,15 @@ class ConfigManager:
 
         raw_data = json.loads(self.config_path.read_text(encoding="utf-8"))
         mode = str(raw_data.get("mode", "manual"))
+        normalized_mode = self._normalize_mode(mode)
+        is_dphy = self._normalize_is_dphy(raw_data.get("is_dphy"))
         return AppConfig(
-            mode=mode,
+            mode=normalized_mode,
             adb_device=self._normalize_adb_device(raw_data.get("adb_device")),
+            is_dphy=is_dphy,
             sensor_idx=self._normalize_sensor_idx(raw_data.get("sensor_idx")),
             sensor_mode=self._normalize_sensor_modes(raw_data.get("sensor_mode")),
-            cdr_delay_start=self._normalize_cdr_delay_start(raw_data.get("cdr_delay_start"), mode),
+            cdr_delay_start=self._normalize_cdr_delay_start(raw_data.get("cdr_delay_start"), is_dphy),
             eq_offset=self._normalize_integer(raw_data.get("eq_offset"), minimum=-31, maximum=31, default=0),
             eq_dg0_enable=self._normalize_integer(raw_data.get("eq_dg0_enable"), minimum=0, maximum=1, default=0),
             eq_sr0=self._normalize_integer(raw_data.get("eq_sr0"), minimum=0, maximum=15, default=0),
@@ -102,14 +106,35 @@ class ConfigManager:
         return sorted(set(normalized))
 
     @staticmethod
-    def _normalize_cdr_delay_start(raw_cdr_delay_start: object, mode: str) -> int:
+    def _normalize_cdr_delay_start(raw_cdr_delay_start: object, is_dphy: bool) -> int:
         try:
             cdr_delay_start = int(raw_cdr_delay_start)
         except (TypeError, ValueError):
             return 0
 
-        maximum = 254 if mode == "dify" else 31
+        maximum = 254 if is_dphy else 31
         return min(max(cdr_delay_start, 0), maximum)
+
+    @staticmethod
+    def _normalize_mode(mode: str) -> str:
+        if mode in {"manual", "auto"}:
+            return mode
+        if mode == "dify":
+            return "auto"
+        return "manual"
+
+    @staticmethod
+    def _normalize_is_dphy(raw_is_dphy: object) -> bool:
+        if isinstance(raw_is_dphy, bool):
+            return raw_is_dphy
+        if raw_is_dphy is None:
+            return False
+        if isinstance(raw_is_dphy, str):
+            return raw_is_dphy.strip().lower() in {"1", "true", "yes", "on"}
+        try:
+            return bool(int(raw_is_dphy))
+        except (TypeError, ValueError):
+            return False
 
     @staticmethod
     def _normalize_integer(raw_value: object, *, minimum: int, maximum: int, default: int) -> int:

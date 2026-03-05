@@ -59,7 +59,7 @@ class CommandProcessor:
         return "\n".join(lines)
 
     def _build_targets(self, config: AppConfig) -> list[tuple[int, int]]:
-        if config.mode not in {"auto", "dify"}:
+        if config.mode != "auto":
             sensor_mode = config.sensor_mode[0] if config.sensor_mode else 0
             return [(config.sensor_idx, sensor_mode)]
 
