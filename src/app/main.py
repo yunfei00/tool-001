@@ -5,6 +5,16 @@ import platform
 import sys
 from pathlib import Path
 
+
+def _load_main_window_class():
+    """Import MainWindow for both package and script entrypoints."""
+    try:
+        from .ui.main_window import MainWindow
+    except ImportError:
+        from app.ui.main_window import MainWindow
+
+    return MainWindow
+
 def _project_root() -> Path:
     """Resolve project root for source run and PyInstaller frozen app."""
     if getattr(sys, "frozen", False):
@@ -39,7 +49,7 @@ def main() -> int:
     from PySide6.QtCore import QTimer
     from PySide6.QtWidgets import QApplication
 
-    from .ui.main_window import MainWindow
+    MainWindow = _load_main_window_class()
 
     app = QApplication(sys.argv)
 
