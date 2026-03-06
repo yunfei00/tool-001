@@ -19,6 +19,20 @@ class AppConfig:
     eq_dg1_enable: int = 0
     eq_sr1: int = 0
     eq_bw: int = 0
+    auto_cdr_delay_start: int = 0
+    auto_cdr_delay_end: int = 31
+    auto_eq_offset_start: int = -31
+    auto_eq_offset_end: int = 31
+    auto_eq_dg0_enable_start: int = 0
+    auto_eq_dg0_enable_end: int = 1
+    auto_eq_sr0_start: int = 0
+    auto_eq_sr0_end: int = 15
+    auto_eq_dg1_enable_start: int = 0
+    auto_eq_dg1_enable_end: int = 1
+    auto_eq_sr1_start: int = 0
+    auto_eq_sr1_end: int = 15
+    auto_eq_bw_start: int = 0
+    auto_eq_bw_end: int = 3
 
 
 class ConfigManager:
@@ -50,6 +64,47 @@ class ConfigManager:
             eq_dg1_enable=self._normalize_integer(raw_data.get("eq_dg1_enable"), minimum=0, maximum=1, default=0),
             eq_sr1=self._normalize_integer(raw_data.get("eq_sr1"), minimum=0, maximum=15, default=0),
             eq_bw=self._normalize_integer(raw_data.get("eq_bw"), minimum=0, maximum=3, default=0),
+            auto_cdr_delay_start=self._normalize_cdr_delay_start(raw_data.get("auto_cdr_delay_start"), is_dphy),
+            auto_cdr_delay_end=self._normalize_cdr_delay_start(
+                raw_data.get("auto_cdr_delay_end", 254 if is_dphy else 31),
+                is_dphy,
+            ),
+            auto_eq_offset_start=self._normalize_integer(
+                raw_data.get("auto_eq_offset_start"), minimum=-31, maximum=31, default=-31
+            ),
+            auto_eq_offset_end=self._normalize_integer(
+                raw_data.get("auto_eq_offset_end"), minimum=-31, maximum=31, default=31
+            ),
+            auto_eq_dg0_enable_start=self._normalize_integer(
+                raw_data.get("auto_eq_dg0_enable_start"), minimum=0, maximum=1, default=0
+            ),
+            auto_eq_dg0_enable_end=self._normalize_integer(
+                raw_data.get("auto_eq_dg0_enable_end"), minimum=0, maximum=1, default=1
+            ),
+            auto_eq_sr0_start=self._normalize_integer(
+                raw_data.get("auto_eq_sr0_start"), minimum=0, maximum=15, default=0
+            ),
+            auto_eq_sr0_end=self._normalize_integer(
+                raw_data.get("auto_eq_sr0_end"), minimum=0, maximum=15, default=15
+            ),
+            auto_eq_dg1_enable_start=self._normalize_integer(
+                raw_data.get("auto_eq_dg1_enable_start"), minimum=0, maximum=1, default=0
+            ),
+            auto_eq_dg1_enable_end=self._normalize_integer(
+                raw_data.get("auto_eq_dg1_enable_end"), minimum=0, maximum=1, default=1
+            ),
+            auto_eq_sr1_start=self._normalize_integer(
+                raw_data.get("auto_eq_sr1_start"), minimum=0, maximum=15, default=0
+            ),
+            auto_eq_sr1_end=self._normalize_integer(
+                raw_data.get("auto_eq_sr1_end"), minimum=0, maximum=15, default=15
+            ),
+            auto_eq_bw_start=self._normalize_integer(
+                raw_data.get("auto_eq_bw_start"), minimum=0, maximum=3, default=0
+            ),
+            auto_eq_bw_end=self._normalize_integer(
+                raw_data.get("auto_eq_bw_end"), minimum=0, maximum=3, default=3
+            ),
         )
 
     def save(self, config: AppConfig) -> None:

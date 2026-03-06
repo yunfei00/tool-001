@@ -71,6 +71,49 @@ class MainWindow(QMainWindow):
 
         self._eq_bw = _SingleSelectCheckGroup(["0", "1", "2", "3"], default="0")
 
+        self._auto_cdr_delay_start = QSpinBox()
+        self._auto_cdr_delay_start.setRange(0, 31)
+        self._auto_cdr_delay_end = QSpinBox()
+        self._auto_cdr_delay_end.setRange(0, 31)
+        self._auto_cdr_delay_end.setValue(31)
+
+        self._auto_eq_offset_start = QSpinBox()
+        self._auto_eq_offset_start.setRange(-31, 31)
+        self._auto_eq_offset_start.setValue(-31)
+        self._auto_eq_offset_end = QSpinBox()
+        self._auto_eq_offset_end.setRange(-31, 31)
+        self._auto_eq_offset_end.setValue(31)
+
+        self._auto_eq_dg0_enable_start = QSpinBox()
+        self._auto_eq_dg0_enable_start.setRange(0, 1)
+        self._auto_eq_dg0_enable_end = QSpinBox()
+        self._auto_eq_dg0_enable_end.setRange(0, 1)
+        self._auto_eq_dg0_enable_end.setValue(1)
+
+        self._auto_eq_sr0_start = QSpinBox()
+        self._auto_eq_sr0_start.setRange(0, 15)
+        self._auto_eq_sr0_end = QSpinBox()
+        self._auto_eq_sr0_end.setRange(0, 15)
+        self._auto_eq_sr0_end.setValue(15)
+
+        self._auto_eq_dg1_enable_start = QSpinBox()
+        self._auto_eq_dg1_enable_start.setRange(0, 1)
+        self._auto_eq_dg1_enable_end = QSpinBox()
+        self._auto_eq_dg1_enable_end.setRange(0, 1)
+        self._auto_eq_dg1_enable_end.setValue(1)
+
+        self._auto_eq_sr1_start = QSpinBox()
+        self._auto_eq_sr1_start.setRange(0, 15)
+        self._auto_eq_sr1_end = QSpinBox()
+        self._auto_eq_sr1_end.setRange(0, 15)
+        self._auto_eq_sr1_end.setValue(15)
+
+        self._auto_eq_bw_start = QSpinBox()
+        self._auto_eq_bw_start.setRange(0, 3)
+        self._auto_eq_bw_end = QSpinBox()
+        self._auto_eq_bw_end.setRange(0, 3)
+        self._auto_eq_bw_end.setValue(3)
+
         self._command_input = QLineEdit()
         self._command_input.setPlaceholderText("Manual: 输入寄存器命令；Auto: 可选输入参数列表(逗号分隔)")
 
@@ -78,12 +121,15 @@ class MainWindow(QMainWindow):
         self._load_button = QPushButton("Load Config")
         self._save_button = QPushButton("Save Config")
         self._clear_log_button = QPushButton("Clear Logs")
+        self._start_test_button = QPushButton("开始测试")
 
         self._log_output = QTextEdit()
         self._log_output.setReadOnly(True)
 
         self._param_detail = QTextEdit()
         self._param_detail.setReadOnly(True)
+
+        self._step_send_buttons: list[QPushButton] = []
 
         self._build_ui()
         self._bind_events()
@@ -116,6 +162,21 @@ class MainWindow(QMainWindow):
         self._config_form.addRow("EQ bw", self._with_step_send(self._eq_bw, "eq bw"))
         config_group.setLayout(self._config_form)
 
+        self._auto_range_group = QGroupBox("Auto Sweep Ranges")
+        self._auto_range_form = QFormLayout()
+        self._auto_range_form.addRow("CDR delay", self._auto_range_row(self._auto_cdr_delay_start, self._auto_cdr_delay_end))
+        self._auto_range_form.addRow("EQ offset", self._auto_range_row(self._auto_eq_offset_start, self._auto_eq_offset_end))
+        self._auto_range_form.addRow(
+            "EQ dg0 enable", self._auto_range_row(self._auto_eq_dg0_enable_start, self._auto_eq_dg0_enable_end)
+        )
+        self._auto_range_form.addRow("EQ sr0", self._auto_range_row(self._auto_eq_sr0_start, self._auto_eq_sr0_end))
+        self._auto_range_form.addRow(
+            "EQ dg1 enable", self._auto_range_row(self._auto_eq_dg1_enable_start, self._auto_eq_dg1_enable_end)
+        )
+        self._auto_range_form.addRow("EQ sr1", self._auto_range_row(self._auto_eq_sr1_start, self._auto_eq_sr1_end))
+        self._auto_range_form.addRow("EQ bw", self._auto_range_row(self._auto_eq_bw_start, self._auto_eq_bw_end))
+        self._auto_range_group.setLayout(self._auto_range_form)
+
         detail_group = QGroupBox("Parameter Details")
         detail_layout = QVBoxLayout()
         detail_layout.addWidget(self._param_detail)
@@ -147,9 +208,11 @@ class MainWindow(QMainWindow):
 
         root_layout = QVBoxLayout()
         root_layout.addLayout(top_layout)
+        root_layout.addWidget(self._auto_range_group)
         root_layout.addLayout(config_actions_layout)
         root_layout.addWidget(command_group)
         root_layout.addWidget(log_group, stretch=1)
+        root_layout.addWidget(self._start_test_button)
 
         container = QWidget()
         container.setLayout(root_layout)
@@ -164,6 +227,7 @@ class MainWindow(QMainWindow):
         self._command_input.returnPressed.connect(self.send_command)
         self._scan_adb_button.clicked.connect(self.scan_adb_devices)
         self._clear_log_button.clicked.connect(self.clear_logs)
+        self._start_test_button.clicked.connect(self._start_auto_test)
 
     def _collect_config(self) -> AppConfig:
         selected_mode = self._mode.selected_text
@@ -182,6 +246,20 @@ class MainWindow(QMainWindow):
             eq_dg1_enable=int(self._eq_dg1_enable.selected_text),
             eq_sr1=self._eq_sr1.value(),
             eq_bw=int(self._eq_bw.selected_text),
+            auto_cdr_delay_start=self._auto_cdr_delay_start.value(),
+            auto_cdr_delay_end=self._auto_cdr_delay_end.value(),
+            auto_eq_offset_start=self._auto_eq_offset_start.value(),
+            auto_eq_offset_end=self._auto_eq_offset_end.value(),
+            auto_eq_dg0_enable_start=self._auto_eq_dg0_enable_start.value(),
+            auto_eq_dg0_enable_end=self._auto_eq_dg0_enable_end.value(),
+            auto_eq_sr0_start=self._auto_eq_sr0_start.value(),
+            auto_eq_sr0_end=self._auto_eq_sr0_end.value(),
+            auto_eq_dg1_enable_start=self._auto_eq_dg1_enable_start.value(),
+            auto_eq_dg1_enable_end=self._auto_eq_dg1_enable_end.value(),
+            auto_eq_sr1_start=self._auto_eq_sr1_start.value(),
+            auto_eq_sr1_end=self._auto_eq_sr1_end.value(),
+            auto_eq_bw_start=self._auto_eq_bw_start.value(),
+            auto_eq_bw_end=self._auto_eq_bw_end.value(),
         )
 
     def _apply_config(self, config: AppConfig) -> None:
@@ -200,6 +278,20 @@ class MainWindow(QMainWindow):
         self._eq_dg1_enable.select(str(config.eq_dg1_enable))
         self._eq_sr1.setValue(config.eq_sr1)
         self._eq_bw.select(str(config.eq_bw))
+        self._auto_cdr_delay_start.setValue(config.auto_cdr_delay_start)
+        self._auto_cdr_delay_end.setValue(config.auto_cdr_delay_end)
+        self._auto_eq_offset_start.setValue(config.auto_eq_offset_start)
+        self._auto_eq_offset_end.setValue(config.auto_eq_offset_end)
+        self._auto_eq_dg0_enable_start.setValue(config.auto_eq_dg0_enable_start)
+        self._auto_eq_dg0_enable_end.setValue(config.auto_eq_dg0_enable_end)
+        self._auto_eq_sr0_start.setValue(config.auto_eq_sr0_start)
+        self._auto_eq_sr0_end.setValue(config.auto_eq_sr0_end)
+        self._auto_eq_dg1_enable_start.setValue(config.auto_eq_dg1_enable_start)
+        self._auto_eq_dg1_enable_end.setValue(config.auto_eq_dg1_enable_end)
+        self._auto_eq_sr1_start.setValue(config.auto_eq_sr1_start)
+        self._auto_eq_sr1_end.setValue(config.auto_eq_sr1_end)
+        self._auto_eq_bw_start.setValue(config.auto_eq_bw_start)
+        self._auto_eq_bw_end.setValue(config.auto_eq_bw_end)
         self._update_mode_dependent_fields(self._mode.selected_text)
 
     def _parse_sensor_modes(self) -> list[int]:
@@ -246,6 +338,11 @@ class MainWindow(QMainWindow):
 
     def _update_mode_dependent_fields(self, mode: str) -> None:
         self._manual_mode_notice.setVisible(mode == "manual")
+        auto_mode = mode == "auto"
+        self._auto_range_group.setVisible(auto_mode)
+        self._start_test_button.setVisible(auto_mode)
+        for button in self._step_send_buttons:
+            button.setVisible(not auto_mode)
 
         has_sensor_mode = mode == "auto"
         self._sensor_mode_row.setVisible(has_sensor_mode)
@@ -255,8 +352,14 @@ class MainWindow(QMainWindow):
 
         cdr_max = 254 if self._is_dphy.isChecked() else 31
         self._cdr_delay_start.setMaximum(cdr_max)
+        self._auto_cdr_delay_start.setMaximum(cdr_max)
+        self._auto_cdr_delay_end.setMaximum(cdr_max)
         if self._cdr_delay_start.value() > cdr_max:
             self._cdr_delay_start.setValue(cdr_max)
+        if self._auto_cdr_delay_start.value() > cdr_max:
+            self._auto_cdr_delay_start.setValue(cdr_max)
+        if self._auto_cdr_delay_end.value() > cdr_max:
+            self._auto_cdr_delay_end.setValue(cdr_max)
 
         self._refresh_param_details(cdr_max)
 
@@ -316,7 +419,20 @@ class MainWindow(QMainWindow):
         step_send_button = QPushButton("单步发送")
         step_send_button.setFixedWidth(88)
         step_send_button.clicked.connect(lambda: self._send_single_step(command))
+        self._step_send_buttons.append(step_send_button)
         layout.addWidget(step_send_button)
+        row.setLayout(layout)
+        return row
+
+    def _auto_range_row(self, start_widget: QWidget, end_widget: QWidget) -> QWidget:
+        row = QWidget()
+        layout = QHBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(QLabel("开始"))
+        layout.addWidget(start_widget)
+        layout.addWidget(QLabel("结束"))
+        layout.addWidget(end_widget)
+        layout.addStretch(1)
         row.setLayout(layout)
         return row
 
@@ -352,6 +468,10 @@ class MainWindow(QMainWindow):
 
         config = self._collect_config()
         if config.mode == "auto":
+            range_errors = self._auto_range_errors(config)
+            if range_errors:
+                self._append_log("自动化测试参数范围错误:\n" + "\n".join(range_errors))
+                return
             response = self._command_processor.run_automated_test(config, command)
             self._append_log(response)
             self._command_input.clear()
@@ -364,6 +484,29 @@ class MainWindow(QMainWindow):
         response = self._command_processor.send(command, config)
         self._append_log(response)
         self._command_input.clear()
+
+    def _start_auto_test(self) -> None:
+        if self._mode.selected_text != "auto":
+            self._append_log("请先切换到自动化测试模式。")
+            return
+        self.send_command()
+
+    @staticmethod
+    def _auto_range_errors(config: AppConfig) -> list[str]:
+        checks = [
+            ("CDR delay", config.auto_cdr_delay_start, config.auto_cdr_delay_end),
+            ("EQ offset", config.auto_eq_offset_start, config.auto_eq_offset_end),
+            ("EQ dg0 enable", config.auto_eq_dg0_enable_start, config.auto_eq_dg0_enable_end),
+            ("EQ sr0", config.auto_eq_sr0_start, config.auto_eq_sr0_end),
+            ("EQ dg1 enable", config.auto_eq_dg1_enable_start, config.auto_eq_dg1_enable_end),
+            ("EQ sr1", config.auto_eq_sr1_start, config.auto_eq_sr1_end),
+            ("EQ bw", config.auto_eq_bw_start, config.auto_eq_bw_end),
+        ]
+        errors: list[str] = []
+        for name, start, end in checks:
+            if start > end:
+                errors.append(f"- {name}: 开始值({start}) 不能大于结束值({end})")
+        return errors
 
 
 class _ModeSelectCheckGroup(QWidget):
