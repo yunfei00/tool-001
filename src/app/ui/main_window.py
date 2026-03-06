@@ -506,8 +506,13 @@ class MainWindow(QMainWindow):
 
         command = self._auto_command_input.text().strip()
 
+        estimated_cases = self._command_processor.estimate_auto_cases(config, command)
+
         self._start_test_button.setEnabled(False)
-        self._append_auto_log("自动化测试已启动，请稍候...")
+        self._append_auto_log(
+            "自动化测试已启动，请稍候..."
+            f"（预计组合数={estimated_cases}）"
+        )
 
         self._auto_test_thread = QThread(self)
         self._auto_test_worker = _AutoTestWorker(self._command_processor, config, command)

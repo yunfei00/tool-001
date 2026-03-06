@@ -160,6 +160,15 @@ class CommandProcessor:
         progress_callback: Callable[[str], None] | None = None,
     ) -> str:
         steps = self._parse_auto_steps(step_text)
+        estimated_cases = self.estimate_auto_cases(config, step_text)
+        self._emit_progress(
+            progress_callback,
+            (
+                "自动化任务已创建："
+                f"steps={', '.join(steps)}；"
+                f"预计组合数={estimated_cases}。"
+            ),
+        )
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_dir = Path("configs") / "auto_test_outputs"
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -178,6 +187,14 @@ class CommandProcessor:
         csv_path = output_dir / f"multi_param_{timestamp}.csv"
         row_count = self._run_multi_param_sweep(steps, config, csv_path, progress_callback)
         return f"自动化测试完成。共 {row_count} 行，CSV 输出: {csv_path}"
+
+    def estimate_auto_cases(self, config: AppConfig, step_text: str = "") -> int:
+        steps = self._parse_auto_steps(step_text)
+        candidates = [self._step_candidates(step, config) for step in steps]
+        total = 1
+        for values in candidates:
+            total *= len(values)
+        return total
 
     def _parse_auto_steps(self, step_text: str) -> list[str]:
         if not step_text.strip():
