@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from PySide6.QtCore import QObject, QThread, Signal
 
 from app.core.adb_device_service import AdbDeviceService
 from app.core.command_processor import CommandProcessor
@@ -132,6 +133,8 @@ class MainWindow(QMainWindow):
         self._auto_param_detail.setReadOnly(True)
 
         self._step_send_buttons: list[QPushButton] = []
+        self._auto_test_thread: QThread | None = None
+        self._auto_test_worker: _AutoTestWorker | None = None
 
         self._build_ui()
         self._bind_events()
@@ -544,6 +547,10 @@ class MainWindow(QMainWindow):
         self._command_input.clear()
 
     def _start_auto_test(self) -> None:
+        if self._auto_test_thread is not None:
+            self._append_auto_log("自动化测试正在运行，请等待当前任务完成。")
+            return
+
         if not self._selected_auto_adb_device():
             self._append_auto_log("No adb device selected. Please scan and choose one device first.")
             return
@@ -555,9 +562,35 @@ class MainWindow(QMainWindow):
             return
 
         command = self._auto_command_input.text().strip()
-        response = self._command_processor.run_automated_test(config, command)
+
+        self._start_test_button.setEnabled(False)
+        self._append_auto_log("自动化测试已启动，请稍候...")
+
+        self._auto_test_thread = QThread(self)
+        self._auto_test_worker = _AutoTestWorker(self._command_processor, config, command)
+        self._auto_test_worker.moveToThread(self._auto_test_thread)
+
+        self._auto_test_thread.started.connect(self._auto_test_worker.run)
+        self._auto_test_worker.finished.connect(self._on_auto_test_finished)
+        self._auto_test_worker.failed.connect(self._on_auto_test_failed)
+        self._auto_test_worker.finished.connect(self._cleanup_auto_test_thread)
+        self._auto_test_worker.failed.connect(self._cleanup_auto_test_thread)
+        self._auto_test_thread.start()
+
+    def _on_auto_test_finished(self, response: str) -> None:
         self._append_auto_log(response)
         self._auto_command_input.clear()
+
+    def _on_auto_test_failed(self, error: str) -> None:
+        self._append_auto_log(f"自动化测试执行失败: {error}")
+
+    def _cleanup_auto_test_thread(self) -> None:
+        if self._auto_test_thread is not None:
+            self._auto_test_thread.quit()
+            self._auto_test_thread.wait()
+        self._auto_test_thread = None
+        self._auto_test_worker = None
+        self._start_test_button.setEnabled(True)
 
     @staticmethod
     def _auto_range_errors(config: AppConfig) -> list[str]:
@@ -572,6 +605,25 @@ class MainWindow(QMainWindow):
             if start > end:
                 errors.append(f"- {name}: 开始值({start}) 不能大于结束值({end})")
         return errors
+
+
+class _AutoTestWorker(QObject):
+    finished = Signal(str)
+    failed = Signal(str)
+
+    def __init__(self, command_processor: CommandProcessor, config: AppConfig, command: str) -> None:
+        super().__init__()
+        self._command_processor = command_processor
+        self._config = config
+        self._command = command
+
+    def run(self) -> None:
+        try:
+            response = self._command_processor.run_automated_test(self._config, self._command)
+        except Exception as error:  # noqa: BLE001
+            self.failed.emit(str(error))
+            return
+        self.finished.emit(response)
 
 
 class _SingleSelectCheckGroup(QWidget):
