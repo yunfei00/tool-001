@@ -573,6 +573,7 @@ class MainWindow(QMainWindow):
         self._auto_test_thread.started.connect(self._auto_test_worker.run)
         self._auto_test_worker.finished.connect(self._on_auto_test_finished)
         self._auto_test_worker.failed.connect(self._on_auto_test_failed)
+        self._auto_test_worker.progress.connect(self._append_auto_log)
         self._auto_test_worker.finished.connect(self._cleanup_auto_test_thread)
         self._auto_test_worker.failed.connect(self._cleanup_auto_test_thread)
         self._auto_test_thread.start()
@@ -610,6 +611,7 @@ class MainWindow(QMainWindow):
 class _AutoTestWorker(QObject):
     finished = Signal(str)
     failed = Signal(str)
+    progress = Signal(str)
 
     def __init__(self, command_processor: CommandProcessor, config: AppConfig, command: str) -> None:
         super().__init__()
@@ -619,7 +621,11 @@ class _AutoTestWorker(QObject):
 
     def run(self) -> None:
         try:
-            response = self._command_processor.run_automated_test(self._config, self._command)
+            response = self._command_processor.run_automated_test(
+                self._config,
+                self._command,
+                progress_callback=self.progress.emit,
+            )
         except Exception as error:  # noqa: BLE001
             self.failed.emit(str(error))
             return

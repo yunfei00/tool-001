@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from itertools import product
 from pathlib import Path
+from collections.abc import Callable
 import shlex
 import csv
 import subprocess
@@ -129,7 +130,12 @@ class CommandProcessor:
             ],
         ]
 
-    def run_automated_test(self, config: AppConfig, step_text: str = "") -> str:
+    def run_automated_test(
+        self,
+        config: AppConfig,
+        step_text: str = "",
+        progress_callback: Callable[[str], None] | None = None,
+    ) -> str:
         steps = self._parse_auto_steps(step_text)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_dir = Path("configs") / "auto_test_outputs"
@@ -138,8 +144,8 @@ class CommandProcessor:
         if set(steps) == {"cdr delay", "eq offset"} and len(steps) == 2:
             cdr_path = output_dir / f"cdr_delay_{timestamp}.txt"
             eq_path = output_dir / f"eq_offset_{timestamp}.txt"
-            self._run_single_param_sweep("cdr delay", config, cdr_path)
-            self._run_single_param_sweep("eq offset", config, eq_path)
+            self._run_single_param_sweep("cdr delay", config, cdr_path, progress_callback)
+            self._run_single_param_sweep("eq offset", config, eq_path, progress_callback)
             return (
                 "自动化测试完成。\n"
                 f"cdr delay 输出文件: {cdr_path}\n"
@@ -147,7 +153,7 @@ class CommandProcessor:
             )
 
         csv_path = output_dir / f"multi_param_{timestamp}.csv"
-        row_count = self._run_multi_param_sweep(steps, config, csv_path)
+        row_count = self._run_multi_param_sweep(steps, config, csv_path, progress_callback)
         return f"自动化测试完成。共 {row_count} 行，CSV 输出: {csv_path}"
 
     def _parse_auto_steps(self, step_text: str) -> list[str]:
@@ -157,21 +163,48 @@ class CommandProcessor:
         steps = [step for step in parts if step in self._STEP_REGISTER_MAP]
         return steps or list(self._DEFAULT_AUTO_STEPS)
 
-    def _run_single_param_sweep(self, step: str, config: AppConfig, output_path: Path) -> None:
+    def _run_single_param_sweep(
+        self,
+        step: str,
+        config: AppConfig,
+        output_path: Path,
+        progress_callback: Callable[[str], None] | None,
+    ) -> None:
+        values = self._step_candidates(step, config)
+        total = len(values)
         with output_path.open("w", encoding="utf-8") as handle:
-            for value in self._step_candidates(step, config):
+            for index, value in enumerate(values, start=1):
+                self._emit_progress(
+                    progress_callback,
+                    f"[{index}/{total}] 执行 {step}={value}",
+                )
                 run_config = self._config_with_step_value(config, step, value)
                 result = self.send(step, run_config, start_stream=True)
                 handle.write(f"{step}={value}\n{result}\n\n")
 
-    def _run_multi_param_sweep(self, steps: list[str], config: AppConfig, csv_path: Path) -> int:
+    def _run_multi_param_sweep(
+        self,
+        steps: list[str],
+        config: AppConfig,
+        csv_path: Path,
+        progress_callback: Callable[[str], None] | None,
+    ) -> int:
         candidates = [self._step_candidates(step, config) for step in steps]
         header = [*steps, "final_result"]
         count = 0
+        total = 1
+        for values in candidates:
+            total *= len(values)
+
         with csv_path.open("w", newline="", encoding="utf-8") as handle:
             writer = csv.writer(handle)
             writer.writerow(header)
-            for values in product(*candidates):
+            for index, values in enumerate(product(*candidates), start=1):
+                progress_detail = ", ".join(f"{step}={value}" for step, value in zip(steps, values))
+                self._emit_progress(
+                    progress_callback,
+                    f"[{index}/{total}] 执行 {progress_detail}",
+                )
                 run_config = config
                 final_result = ""
                 for step, value in zip(steps, values):
@@ -180,6 +213,11 @@ class CommandProcessor:
                 writer.writerow([*values, final_result])
                 count += 1
         return count
+
+    @staticmethod
+    def _emit_progress(progress_callback: Callable[[str], None] | None, message: str) -> None:
+        if progress_callback is not None:
+            progress_callback(message)
 
     def _step_candidates(self, step: str, config: AppConfig) -> list[int]:
         if step == "cdr delay":
