@@ -29,13 +29,13 @@ class CommandProcessor:
         "eq bw": "EQ_BW",
     }
     _DEFAULT_AUTO_STEPS = (
-        "cdr delay",
-        "eq offset",
         "eq dg0 enable",
         "eq sr0",
         "eq dg1 enable",
         "eq sr1",
         "eq bw",
+        "cdr delay",
+        "eq offset",
     )
     _SENTEST_LOCAL_PATH = Path("tool") / "sentest_v4l2"
     _SENTEST_REMOTE_PATH = "/data/local/tmp/sentest_v4l2"
@@ -193,17 +193,33 @@ class CommandProcessor:
     def estimate_auto_cases(self, config: AppConfig, step_text: str = "") -> int:
         steps = self._parse_auto_steps(step_text)
         candidates = [self._step_candidates(step, config) for step in steps]
+        target_count = len(self._build_targets(config))
         total = 1
         for values in candidates:
             total *= len(values)
-        return total
+        return total * target_count
 
     def _parse_auto_steps(self, step_text: str) -> list[str]:
         if not step_text.strip():
             return list(self._DEFAULT_AUTO_STEPS)
         parts = [part.strip().lower() for part in step_text.replace(";", ",").split(",")]
         steps = [step for step in parts if step in self._STEP_REGISTER_MAP]
-        return steps or list(self._DEFAULT_AUTO_STEPS)
+        return self._ordered_steps(steps or list(self._DEFAULT_AUTO_STEPS))
+
+    @staticmethod
+    def _ordered_steps(steps: list[str]) -> list[str]:
+        """Keep cdr delay and eq offset at the end while preserving order for others."""
+        seen: set[str] = set()
+        ordered: list[str] = []
+        for step in steps:
+            if step in seen:
+                continue
+            seen.add(step)
+            ordered.append(step)
+
+        trailing = [step for step in ("cdr delay", "eq offset") if step in ordered]
+        leading = [step for step in ordered if step not in {"cdr delay", "eq offset"}]
+        return [*leading, *trailing]
 
     def _run_single_param_sweep(
         self,
@@ -214,29 +230,44 @@ class CommandProcessor:
         should_stop_callback: Callable[[], bool] | None,
     ) -> None:
         values = self._step_candidates(step, config)
-        total = len(values)
+        targets = self._build_targets(config)
+        total = max(len(values), 1) * max(len(targets), 1)
         with output_path.open("w", encoding="utf-8") as handle:
-            for index, value in enumerate(values, start=1):
-                if self._should_stop(should_stop_callback):
-                    self._emit_progress(progress_callback, "收到停止请求，终止当前自动化任务。")
-                    return
-                self._emit_progress(
-                    progress_callback,
-                    f"[{index}/{total}] 执行 {step}={value}",
-                )
-                run_config = self._config_with_step_value(config, step, value)
-                self._emit_progress(
-                    progress_callback,
-                    f"[{index}/{total}] 准备执行命令 step={step} value={value}",
-                )
-                start_ts = time.perf_counter()
-                result = self.send(step, run_config, start_stream=True)
-                elapsed = time.perf_counter() - start_ts
-                self._emit_progress(
-                    progress_callback,
-                    f"[{index}/{total}] 完成 step={step} value={value} 用时={elapsed:.2f}s",
-                )
-                handle.write(f"{step}={value}\n{result}\n\n")
+            index = 0
+            for sensor_idx, sensor_mode in targets:
+                run_config = self._config_with_target(config, sensor_idx=sensor_idx, sensor_mode=sensor_mode)
+                stream_started = False
+                applied_value: int | None = None
+                for value in values:
+                    if self._should_stop(should_stop_callback):
+                        self._emit_progress(progress_callback, "收到停止请求，终止当前自动化任务。")
+                        return
+                    index += 1
+                    self._emit_progress(
+                        progress_callback,
+                        f"[{index}/{total}] 执行 sensor idx={sensor_idx}, sensor mode={sensor_mode}, {step}={value}",
+                    )
+                    if applied_value == value:
+                        self._emit_progress(
+                            progress_callback,
+                            f"[{index}/{total}] 跳过未变化参数 step={step} value={value}",
+                        )
+                        continue
+                    run_config = self._config_with_step_value(run_config, step, value)
+                    self._emit_progress(
+                        progress_callback,
+                        f"[{index}/{total}] 准备执行命令 step={step} value={value}",
+                    )
+                    start_ts = time.perf_counter()
+                    result = self.send(step, run_config, start_stream=not stream_started)
+                    stream_started = True
+                    elapsed = time.perf_counter() - start_ts
+                    self._emit_progress(
+                        progress_callback,
+                        f"[{index}/{total}] 完成 step={step} value={value} 用时={elapsed:.2f}s",
+                    )
+                    applied_value = value
+                    handle.write(f"sensor idx={sensor_idx} sensor mode={sensor_mode} {step}={value}\n{result}\n\n")
 
     def _run_multi_param_sweep(
         self,
@@ -247,44 +278,58 @@ class CommandProcessor:
         should_stop_callback: Callable[[], bool] | None,
     ) -> int:
         candidates = [self._step_candidates(step, config) for step in steps]
-        header = [*steps, "final_result"]
+        targets = self._build_targets(config)
+        header = ["sensor idx", "sensor mode", *steps, "final_result"]
         count = 0
-        total = 1
+        total = max(len(targets), 1)
         for values in candidates:
             total *= len(values)
 
         with csv_path.open("w", newline="", encoding="utf-8") as handle:
             writer = csv.writer(handle)
             writer.writerow(header)
-            for index, values in enumerate(product(*candidates), start=1):
-                if self._should_stop(should_stop_callback):
-                    self._emit_progress(progress_callback, "收到停止请求，终止当前自动化任务。")
-                    break
-                progress_detail = ", ".join(f"{step}={value}" for step, value in zip(steps, values))
-                self._emit_progress(
-                    progress_callback,
-                    f"[{index}/{total}] 执行 {progress_detail}",
-                )
-                run_config = config
-                final_result = ""
-                for step, value in zip(steps, values):
+            index = 0
+            for sensor_idx, sensor_mode in targets:
+                run_config = self._config_with_target(config, sensor_idx=sensor_idx, sensor_mode=sensor_mode)
+                applied_values: dict[str, int] = {}
+                stream_started = False
+                for values in product(*candidates):
                     if self._should_stop(should_stop_callback):
                         self._emit_progress(progress_callback, "收到停止请求，终止当前自动化任务。")
                         return count
-                    run_config = self._config_with_step_value(run_config, step, value)
+                    index += 1
+                    progress_detail = ", ".join(f"{step}={value}" for step, value in zip(steps, values))
                     self._emit_progress(
                         progress_callback,
-                        f"[{index}/{total}] 开始执行子步骤 step={step} value={value}",
+                        f"[{index}/{total}] 执行 sensor idx={sensor_idx}, sensor mode={sensor_mode}, {progress_detail}",
                     )
-                    start_ts = time.perf_counter()
-                    final_result = self.send(step, run_config, start_stream=True)
-                    elapsed = time.perf_counter() - start_ts
-                    self._emit_progress(
-                        progress_callback,
-                        f"[{index}/{total}] 子步骤完成 step={step} value={value} 用时={elapsed:.2f}s",
-                    )
-                writer.writerow([*values, final_result])
-                count += 1
+                    final_result = ""
+                    for step, value in zip(steps, values):
+                        if self._should_stop(should_stop_callback):
+                            self._emit_progress(progress_callback, "收到停止请求，终止当前自动化任务。")
+                            return count
+                        if applied_values.get(step) == value:
+                            self._emit_progress(
+                                progress_callback,
+                                f"[{index}/{total}] 跳过未变化参数 step={step} value={value}",
+                            )
+                            continue
+                        run_config = self._config_with_step_value(run_config, step, value)
+                        self._emit_progress(
+                            progress_callback,
+                            f"[{index}/{total}] 开始执行子步骤 step={step} value={value}",
+                        )
+                        start_ts = time.perf_counter()
+                        final_result = self.send(step, run_config, start_stream=not stream_started)
+                        stream_started = True
+                        elapsed = time.perf_counter() - start_ts
+                        self._emit_progress(
+                            progress_callback,
+                            f"[{index}/{total}] 子步骤完成 step={step} value={value} 用时={elapsed:.2f}s",
+                        )
+                        applied_values[step] = value
+                    writer.writerow([sensor_idx, sensor_mode, *values, final_result])
+                    count += 1
         return count
 
 
@@ -361,6 +406,34 @@ class CommandProcessor:
             eq_dg1_enable=value if step == "eq dg1 enable" else config.eq_dg1_enable,
             eq_sr1=value if step == "eq sr1" else config.eq_sr1,
             eq_bw=value if step == "eq bw" else config.eq_bw,
+        )
+
+    def _config_with_target(self, config: AppConfig, *, sensor_idx: int, sensor_mode: int) -> AppConfig:
+        return AppConfig(
+            mode="manual",
+            adb_device=config.adb_device,
+            is_dphy=config.is_dphy,
+            sensor_idx=sensor_idx,
+            auto_sensor_idx=[sensor_idx],
+            sensor_mode=[sensor_mode],
+            cdr_delay_start=config.cdr_delay_start,
+            eq_offset=config.eq_offset,
+            eq_dg0_enable=config.eq_dg0_enable,
+            eq_sr0=config.eq_sr0,
+            eq_dg1_enable=config.eq_dg1_enable,
+            eq_sr1=config.eq_sr1,
+            eq_bw=config.eq_bw,
+            auto_cdr_delay_start=config.auto_cdr_delay_start,
+            auto_cdr_delay_end=config.auto_cdr_delay_end,
+            auto_eq_offset_start=config.auto_eq_offset_start,
+            auto_eq_offset_end=config.auto_eq_offset_end,
+            auto_eq_dg0_enable_values=config.auto_eq_dg0_enable_values,
+            auto_eq_sr0_start=config.auto_eq_sr0_start,
+            auto_eq_sr0_end=config.auto_eq_sr0_end,
+            auto_eq_dg1_enable_values=config.auto_eq_dg1_enable_values,
+            auto_eq_sr1_start=config.auto_eq_sr1_start,
+            auto_eq_sr1_end=config.auto_eq_sr1_end,
+            auto_eq_bw_values=config.auto_eq_bw_values,
         )
 
     def _build_targets(self, config: AppConfig) -> list[tuple[int, int]]:
