@@ -213,13 +213,13 @@ class MainWindow(QMainWindow):
         auto_form = QFormLayout()
         auto_form.addRow("Sensor idx", self._auto_sensor_idx)
         auto_form.addRow("Sensor mode", self._auto_sensor_mode)
-        auto_form.addRow("CDR delay", self._auto_range_row(self._auto_cdr_delay_start, self._auto_cdr_delay_end, self._auto_is_dphy))
-        auto_form.addRow("EQ offset", self._auto_range_row(self._auto_eq_offset_start, self._auto_eq_offset_end))
         auto_form.addRow("EQ dg0 enable", self._auto_eq_dg0_enable)
         auto_form.addRow("EQ sr0", self._auto_range_row(self._auto_eq_sr0_start, self._auto_eq_sr0_end))
         auto_form.addRow("EQ dg1 enable", self._auto_eq_dg1_enable)
         auto_form.addRow("EQ sr1", self._auto_range_row(self._auto_eq_sr1_start, self._auto_eq_sr1_end))
         auto_form.addRow("EQ bw", self._auto_eq_bw)
+        auto_form.addRow("CDR delay", self._auto_range_row(self._auto_cdr_delay_start, self._auto_cdr_delay_end, self._auto_is_dphy))
+        auto_form.addRow("EQ offset", self._auto_range_row(self._auto_eq_offset_start, self._auto_eq_offset_end))
         auto_layout.addLayout(auto_form)
         auto_actions_layout = QHBoxLayout()
         auto_actions_layout.addWidget(self._start_test_button)
@@ -434,9 +434,11 @@ class MainWindow(QMainWindow):
         row = QWidget()
         layout = QHBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(QLabel("开始"))
+        layout.addWidget(QLabel("start"))
+        start_widget.setMinimumWidth(70)
+        end_widget.setMinimumWidth(110)
         layout.addWidget(start_widget)
-        layout.addWidget(QLabel("结束"))
+        layout.addWidget(QLabel("end"))
         layout.addWidget(end_widget)
         if extra_widget is not None:
             layout.addWidget(extra_widget)
@@ -569,7 +571,7 @@ class MainWindow(QMainWindow):
         errors: list[str] = []
         for name, start, end in checks:
             if start > end:
-                errors.append(f"- {name}: 开始值({start}) 不能大于结束值({end})")
+                errors.append(f"- {name}: start值({start}) 不能大于end值({end})")
         return errors
 
 
