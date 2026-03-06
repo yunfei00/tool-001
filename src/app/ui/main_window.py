@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QPushButton,
     QSpinBox,
+    QTabWidget,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -30,13 +31,12 @@ class MainWindow(QMainWindow):
     def __init__(self, config_path: Path) -> None:
         super().__init__()
         self.setWindowTitle("tool-001")
-        self.resize(900, 520)
+        self.resize(980, 620)
 
         self._config_manager = ConfigManager(config_path)
         self._command_processor = CommandProcessor()
         self._adb_device_service = AdbDeviceService()
 
-        self._mode = _ModeSelectCheckGroup(default="manual")
         self._manual_mode_notice = QLabel(
             "参数写入和测试过程中，请始终保持 camera 工作。熄屏或退出会导致写入的参数擦除。"
         )
@@ -47,9 +47,10 @@ class MainWindow(QMainWindow):
         self._scan_adb_button = QPushButton("Scan ADB")
         self._adb_devices: list[str] = []
 
-        self._sensor_idx = _SingleSelectCheckGroup([str(value) for value in self._SENSOR_INDEX_OPTIONS], default="1")
-
-        self._sensor_mode = _MultiSelectCheckGroup(["0", "1", "2"], default=["0"])
+        self._manual_sensor_idx = _SingleSelectCheckGroup([str(value) for value in self._SENSOR_INDEX_OPTIONS], default="1")
+        self._manual_sensor_mode = _SingleSelectCheckGroup(["0", "1", "2"], default="0")
+        self._auto_sensor_idx = _MultiSelectCheckGroup([str(value) for value in self._SENSOR_INDEX_OPTIONS], default=["1"])
+        self._auto_sensor_mode = _MultiSelectCheckGroup(["0", "1", "2"], default=["0"])
 
         self._is_dphy = QCheckBox("DPHY")
 
@@ -84,11 +85,7 @@ class MainWindow(QMainWindow):
         self._auto_eq_offset_end.setRange(-31, 31)
         self._auto_eq_offset_end.setValue(31)
 
-        self._auto_eq_dg0_enable_start = QSpinBox()
-        self._auto_eq_dg0_enable_start.setRange(0, 1)
-        self._auto_eq_dg0_enable_end = QSpinBox()
-        self._auto_eq_dg0_enable_end.setRange(0, 1)
-        self._auto_eq_dg0_enable_end.setValue(1)
+        self._auto_eq_dg0_enable = _MultiSelectCheckGroup(["0", "1"], default=["0", "1"])
 
         self._auto_eq_sr0_start = QSpinBox()
         self._auto_eq_sr0_start.setRange(0, 15)
@@ -96,11 +93,7 @@ class MainWindow(QMainWindow):
         self._auto_eq_sr0_end.setRange(0, 15)
         self._auto_eq_sr0_end.setValue(15)
 
-        self._auto_eq_dg1_enable_start = QSpinBox()
-        self._auto_eq_dg1_enable_start.setRange(0, 1)
-        self._auto_eq_dg1_enable_end = QSpinBox()
-        self._auto_eq_dg1_enable_end.setRange(0, 1)
-        self._auto_eq_dg1_enable_end.setValue(1)
+        self._auto_eq_dg1_enable = _MultiSelectCheckGroup(["0", "1"], default=["0", "1"])
 
         self._auto_eq_sr1_start = QSpinBox()
         self._auto_eq_sr1_start.setRange(0, 15)
@@ -108,14 +101,10 @@ class MainWindow(QMainWindow):
         self._auto_eq_sr1_end.setRange(0, 15)
         self._auto_eq_sr1_end.setValue(15)
 
-        self._auto_eq_bw_start = QSpinBox()
-        self._auto_eq_bw_start.setRange(0, 3)
-        self._auto_eq_bw_end = QSpinBox()
-        self._auto_eq_bw_end.setRange(0, 3)
-        self._auto_eq_bw_end.setValue(3)
+        self._auto_eq_bw = _MultiSelectCheckGroup(["0", "1", "2", "3"], default=["0", "1", "2", "3"])
 
         self._command_input = QLineEdit()
-        self._command_input.setPlaceholderText("Manual: 输入寄存器命令；Auto: 可选输入参数列表(逗号分隔)")
+        self._command_input.setPlaceholderText("手动模式可输入寄存器命令；自动模式可选输入测试步骤列表(逗号分隔)")
 
         self._send_button = QPushButton("Send")
         self._load_button = QPushButton("Load Config")
@@ -137,9 +126,7 @@ class MainWindow(QMainWindow):
 
     def _build_ui(self) -> None:
         config_group = QGroupBox("Configuration")
-        self._config_form = QFormLayout()
-        self._config_form.addRow("模式", self._mode)
-        self._config_form.addRow("", self._manual_mode_notice)
+        config_form = QFormLayout()
 
         adb_device_row = QWidget()
         adb_device_layout = QHBoxLayout()
@@ -147,35 +134,19 @@ class MainWindow(QMainWindow):
         adb_device_layout.addWidget(self._adb_device_combo)
         adb_device_layout.addWidget(self._scan_adb_button)
         adb_device_row.setLayout(adb_device_layout)
-        self._config_form.addRow("ADB Device", adb_device_row)
+        config_form.addRow("ADB Device", adb_device_row)
+        config_form.addRow("CDR delay", self._with_step_send(self._cdr_delay_start, "cdr delay", self._is_dphy))
+        config_form.addRow("EQ offset", self._with_step_send(self._eq_offset, "eq offset"))
+        config_form.addRow("EQ dg0 enable", self._with_step_send(self._eq_dg0_enable, "eq dg0 enable"))
+        config_form.addRow("EQ sr0", self._with_step_send(self._eq_sr0, "eq sr0"))
+        config_form.addRow("EQ dg1 enable", self._with_step_send(self._eq_dg1_enable, "eq dg1 enable"))
+        config_form.addRow("EQ sr1", self._with_step_send(self._eq_sr1, "eq sr1"))
+        config_form.addRow("EQ bw", self._with_step_send(self._eq_bw, "eq bw"))
+        config_group.setLayout(config_form)
 
-        self._config_form.addRow("Sensor idx", self._sensor_idx)
-        self._sensor_mode_label = "Sensor mode"
-        self._sensor_mode_row = self._with_step_send(self._sensor_mode, "sensor mode")
-        self._config_form.addRow(self._sensor_mode_label, self._sensor_mode_row)
-        self._config_form.addRow("CDR delay", self._with_step_send(self._cdr_delay_start, "cdr delay", self._is_dphy))
-        self._config_form.addRow("EQ offset", self._with_step_send(self._eq_offset, "eq offset"))
-        self._config_form.addRow("EQ dg0 enable", self._with_step_send(self._eq_dg0_enable, "eq dg0 enable"))
-        self._config_form.addRow("EQ sr0", self._with_step_send(self._eq_sr0, "eq sr0"))
-        self._config_form.addRow("EQ dg1 enable", self._with_step_send(self._eq_dg1_enable, "eq dg1 enable"))
-        self._config_form.addRow("EQ sr1", self._with_step_send(self._eq_sr1, "eq sr1"))
-        self._config_form.addRow("EQ bw", self._with_step_send(self._eq_bw, "eq bw"))
-        config_group.setLayout(self._config_form)
-
-        self._auto_range_group = QGroupBox("Auto Sweep Ranges")
-        self._auto_range_form = QFormLayout()
-        self._auto_range_form.addRow("CDR delay", self._auto_range_row(self._auto_cdr_delay_start, self._auto_cdr_delay_end))
-        self._auto_range_form.addRow("EQ offset", self._auto_range_row(self._auto_eq_offset_start, self._auto_eq_offset_end))
-        self._auto_range_form.addRow(
-            "EQ dg0 enable", self._auto_range_row(self._auto_eq_dg0_enable_start, self._auto_eq_dg0_enable_end)
-        )
-        self._auto_range_form.addRow("EQ sr0", self._auto_range_row(self._auto_eq_sr0_start, self._auto_eq_sr0_end))
-        self._auto_range_form.addRow(
-            "EQ dg1 enable", self._auto_range_row(self._auto_eq_dg1_enable_start, self._auto_eq_dg1_enable_end)
-        )
-        self._auto_range_form.addRow("EQ sr1", self._auto_range_row(self._auto_eq_sr1_start, self._auto_eq_sr1_end))
-        self._auto_range_form.addRow("EQ bw", self._auto_range_row(self._auto_eq_bw_start, self._auto_eq_bw_end))
-        self._auto_range_group.setLayout(self._auto_range_form)
+        self._mode_tabs = QTabWidget()
+        self._mode_tabs.addTab(self._build_manual_tab(), "单步调试")
+        self._mode_tabs.addTab(self._build_auto_tab(), "自动化测试")
 
         detail_group = QGroupBox("Parameter Details")
         detail_layout = QVBoxLayout()
@@ -208,18 +179,48 @@ class MainWindow(QMainWindow):
 
         root_layout = QVBoxLayout()
         root_layout.addLayout(top_layout)
-        root_layout.addWidget(self._auto_range_group)
+        root_layout.addWidget(self._mode_tabs)
         root_layout.addLayout(config_actions_layout)
         root_layout.addWidget(command_group)
         root_layout.addWidget(log_group, stretch=1)
-        root_layout.addWidget(self._start_test_button)
 
         container = QWidget()
         container.setLayout(root_layout)
         self.setCentralWidget(container)
 
+    def _build_manual_tab(self) -> QWidget:
+        tab = QWidget()
+        layout = QVBoxLayout()
+        form = QFormLayout()
+        form.addRow("Sensor idx", self._manual_sensor_idx)
+        form.addRow("Sensor mode", self._manual_sensor_mode)
+        layout.addWidget(self._manual_mode_notice)
+        layout.addLayout(form)
+        layout.addStretch(1)
+        tab.setLayout(layout)
+        return tab
+
+    def _build_auto_tab(self) -> QWidget:
+        tab = QWidget()
+        layout = QVBoxLayout()
+        form = QFormLayout()
+        form.addRow("Sensor idx", self._auto_sensor_idx)
+        form.addRow("Sensor mode", self._auto_sensor_mode)
+        form.addRow("CDR delay", self._auto_range_row(self._auto_cdr_delay_start, self._auto_cdr_delay_end))
+        form.addRow("EQ offset", self._auto_range_row(self._auto_eq_offset_start, self._auto_eq_offset_end))
+        form.addRow("EQ dg0 enable", self._auto_eq_dg0_enable)
+        form.addRow("EQ sr0", self._auto_range_row(self._auto_eq_sr0_start, self._auto_eq_sr0_end))
+        form.addRow("EQ dg1 enable", self._auto_eq_dg1_enable)
+        form.addRow("EQ sr1", self._auto_range_row(self._auto_eq_sr1_start, self._auto_eq_sr1_end))
+        form.addRow("EQ bw", self._auto_eq_bw)
+        layout.addLayout(form)
+        layout.addWidget(self._start_test_button)
+        layout.addStretch(1)
+        tab.setLayout(layout)
+        return tab
+
     def _bind_events(self) -> None:
-        self._mode.selection_changed.connect(self._on_mode_changed)
+        self._mode_tabs.currentChanged.connect(self._on_mode_changed)
         self._is_dphy.toggled.connect(self._on_dphy_toggled)
         self._load_button.clicked.connect(self.load_config)
         self._save_button.clicked.connect(self.save_config)
@@ -229,16 +230,21 @@ class MainWindow(QMainWindow):
         self._clear_log_button.clicked.connect(self.clear_logs)
         self._start_test_button.clicked.connect(self._start_auto_test)
 
+    def _is_auto_mode(self) -> bool:
+        return self._mode_tabs.currentIndex() == 1
+
     def _collect_config(self) -> AppConfig:
-        selected_mode = self._mode.selected_text
-        sensor_modes = self._parse_sensor_modes() if selected_mode == "auto" else None
-        sensor_idx_value = int(self._sensor_idx.selected_text)
+        auto_mode = self._is_auto_mode()
+        sensor_mode = self._parse_auto_sensor_modes() if auto_mode else [int(self._manual_sensor_mode.selected_text)]
+        sensor_idx = int(self._manual_sensor_idx.selected_text)
+        auto_sensor_idx = [int(value) for value in self._auto_sensor_idx.selected_texts] if auto_mode else None
         return AppConfig(
-            mode=selected_mode,
+            mode="auto" if auto_mode else "manual",
             adb_device=self._selected_adb_device(),
             is_dphy=self._is_dphy.isChecked(),
-            sensor_idx=sensor_idx_value,
-            sensor_mode=sensor_modes,
+            sensor_idx=sensor_idx,
+            auto_sensor_idx=auto_sensor_idx,
+            sensor_mode=sensor_mode,
             cdr_delay_start=self._cdr_delay_start.value(),
             eq_offset=self._eq_offset.value(),
             eq_dg0_enable=int(self._eq_dg0_enable.selected_text),
@@ -250,27 +256,32 @@ class MainWindow(QMainWindow):
             auto_cdr_delay_end=self._auto_cdr_delay_end.value(),
             auto_eq_offset_start=self._auto_eq_offset_start.value(),
             auto_eq_offset_end=self._auto_eq_offset_end.value(),
-            auto_eq_dg0_enable_start=self._auto_eq_dg0_enable_start.value(),
-            auto_eq_dg0_enable_end=self._auto_eq_dg0_enable_end.value(),
+            auto_eq_dg0_enable_values=[int(value) for value in self._auto_eq_dg0_enable.selected_texts],
             auto_eq_sr0_start=self._auto_eq_sr0_start.value(),
             auto_eq_sr0_end=self._auto_eq_sr0_end.value(),
-            auto_eq_dg1_enable_start=self._auto_eq_dg1_enable_start.value(),
-            auto_eq_dg1_enable_end=self._auto_eq_dg1_enable_end.value(),
+            auto_eq_dg1_enable_values=[int(value) for value in self._auto_eq_dg1_enable.selected_texts],
             auto_eq_sr1_start=self._auto_eq_sr1_start.value(),
             auto_eq_sr1_end=self._auto_eq_sr1_end.value(),
-            auto_eq_bw_start=self._auto_eq_bw_start.value(),
-            auto_eq_bw_end=self._auto_eq_bw_end.value(),
+            auto_eq_bw_values=[int(value) for value in self._auto_eq_bw.selected_texts],
         )
 
     def _apply_config(self, config: AppConfig) -> None:
-        self._mode.select(config.mode if config.mode in {"manual", "auto"} else "manual")
+        self._mode_tabs.setCurrentIndex(1 if config.mode == "auto" else 0)
         self._refresh_adb_devices(preferred=config.adb_device, should_log=False)
         self._is_dphy.setChecked(config.is_dphy)
-        self._sensor_idx.select(str(config.sensor_idx))
+        self._manual_sensor_idx.select(str(config.sensor_idx))
         if config.sensor_mode:
-            self._sensor_mode.select_many([str(value) for value in config.sensor_mode])
+            self._manual_sensor_mode.select(str(config.sensor_mode[0]))
+            self._auto_sensor_mode.select_many([str(value) for value in config.sensor_mode])
         else:
-            self._sensor_mode.select_many(["0"])
+            self._manual_sensor_mode.select("0")
+            self._auto_sensor_mode.select_many(["0"])
+
+        if config.auto_sensor_idx:
+            self._auto_sensor_idx.select_many([str(value) for value in config.auto_sensor_idx])
+        else:
+            self._auto_sensor_idx.select_many(["1"])
+
         self._cdr_delay_start.setValue(config.cdr_delay_start)
         self._eq_offset.setValue(config.eq_offset)
         self._eq_dg0_enable.select(str(config.eq_dg0_enable))
@@ -282,20 +293,21 @@ class MainWindow(QMainWindow):
         self._auto_cdr_delay_end.setValue(config.auto_cdr_delay_end)
         self._auto_eq_offset_start.setValue(config.auto_eq_offset_start)
         self._auto_eq_offset_end.setValue(config.auto_eq_offset_end)
-        self._auto_eq_dg0_enable_start.setValue(config.auto_eq_dg0_enable_start)
-        self._auto_eq_dg0_enable_end.setValue(config.auto_eq_dg0_enable_end)
+        self._auto_eq_dg0_enable.select_many(
+            [str(value) for value in (config.auto_eq_dg0_enable_values or [0, 1])]
+        )
         self._auto_eq_sr0_start.setValue(config.auto_eq_sr0_start)
         self._auto_eq_sr0_end.setValue(config.auto_eq_sr0_end)
-        self._auto_eq_dg1_enable_start.setValue(config.auto_eq_dg1_enable_start)
-        self._auto_eq_dg1_enable_end.setValue(config.auto_eq_dg1_enable_end)
+        self._auto_eq_dg1_enable.select_many(
+            [str(value) for value in (config.auto_eq_dg1_enable_values or [0, 1])]
+        )
         self._auto_eq_sr1_start.setValue(config.auto_eq_sr1_start)
         self._auto_eq_sr1_end.setValue(config.auto_eq_sr1_end)
-        self._auto_eq_bw_start.setValue(config.auto_eq_bw_start)
-        self._auto_eq_bw_end.setValue(config.auto_eq_bw_end)
-        self._update_mode_dependent_fields(self._mode.selected_text)
+        self._auto_eq_bw.select_many([str(value) for value in (config.auto_eq_bw_values or [0, 1, 2, 3])])
+        self._update_mode_dependent_fields()
 
-    def _parse_sensor_modes(self) -> list[int]:
-        selected_modes = [int(value) for value in self._sensor_mode.selected_texts]
+    def _parse_auto_sensor_modes(self) -> list[int]:
+        selected_modes = [int(value) for value in self._auto_sensor_mode.selected_texts]
         return selected_modes or [0]
 
     def _selected_adb_device(self) -> str | None:
@@ -329,26 +341,16 @@ class MainWindow(QMainWindow):
     def scan_adb_devices(self) -> None:
         self._refresh_adb_devices(should_log=True)
 
-    def _on_mode_changed(self, _button: QCheckBox) -> None:
-        self._update_mode_dependent_fields(self._mode.selected_text)
-
+    def _on_mode_changed(self, _index: int) -> None:
+        self._update_mode_dependent_fields()
 
     def _on_dphy_toggled(self, _checked: bool) -> None:
-        self._update_mode_dependent_fields(self._mode.selected_text)
+        self._update_mode_dependent_fields()
 
-    def _update_mode_dependent_fields(self, mode: str) -> None:
-        self._manual_mode_notice.setVisible(mode == "manual")
-        auto_mode = mode == "auto"
-        self._auto_range_group.setVisible(auto_mode)
-        self._start_test_button.setVisible(auto_mode)
+    def _update_mode_dependent_fields(self) -> None:
+        auto_mode = self._is_auto_mode()
         for button in self._step_send_buttons:
             button.setVisible(not auto_mode)
-
-        has_sensor_mode = mode == "auto"
-        self._sensor_mode_row.setVisible(has_sensor_mode)
-        sensor_mode_label = self._config_form.labelForField(self._sensor_mode_row)
-        if sensor_mode_label is not None:
-            sensor_mode_label.setVisible(has_sensor_mode)
 
         cdr_max = 254 if self._is_dphy.isChecked() else 31
         self._cdr_delay_start.setMaximum(cdr_max)
@@ -365,47 +367,22 @@ class MainWindow(QMainWindow):
 
     def _refresh_param_details(self, cdr_max: int) -> None:
         lines = [
-            "1) adb device",
-            "- source: adb devices",
-            "- behavior: if multiple devices are found, user selects one manually",
+            "Tab1: 单步调试(manual)",
+            "- sensor idx: 单选 checkbox",
+            "- sensor mode: 单选 checkbox",
             "",
-            "2) sensor idx",
-            "- type: single-select checkbox",
-            "- allowed: 1, 2, 4, 8, 16",
+            "Tab2: 自动化测试(auto)",
+            "- sensor idx: 多选 checkbox",
+            "- sensor mode: 多选 checkbox",
+            "- cdr delay / eq offset / eq sr0 / eq sr1: start-end 遍历",
+            "- eq dg0 enable / eq dg1 enable / eq bw: 多选 checkbox",
             "",
-            "3) sensor mode",
-            "- type: multi-select checkbox",
-            "- allowed: 0, 1, 2",
+            "参数范围:",
+            f"- cdr delay: 0 ~ {cdr_max}",
+            "- eq offset: -31 ~ 31",
+            "- eq sr0 / eq sr1: 0 ~ 15",
             "",
-            "4) cdr delay",
-            f"- range: 0 ~ {cdr_max}",
-            "- phy linkage: CPHY -> 0 ~ 31, DPHY -> 0 ~ 254",
-            "- includes DPHY checkbox: unchecked=CPHY, checked=DPHY",
-            "",
-            "5) eq offset",
-            "- range: -31 ~ 31",
-            "",
-            "6) eq dg0 enable",
-            "- type: single-select checkbox",
-            "- allowed: 0, 1",
-            "",
-            "7) eq sr0",
-            "- range: 0 ~ 15",
-            "",
-            "8) eq dg1 enable",
-            "- type: single-select checkbox",
-            "- allowed: 0, 1",
-            "",
-            "9) eq sr1",
-            "- range: 0 ~ 15",
-            "",
-            "10) eq bw",
-            "- type: single-select checkbox",
-            "- allowed: 0, 1, 2, 3",
-            "",
-            "11) mode",
-            "- type: single-select checkbox",
-            "- allowed: 单步调试(manual), 自动化测试(auto)",
+            "ADB Device 由 adb devices 获取。",
         ]
         self._param_detail.setPlainText("\n".join(lines))
 
@@ -486,7 +463,7 @@ class MainWindow(QMainWindow):
         self._command_input.clear()
 
     def _start_auto_test(self) -> None:
-        if self._mode.selected_text != "auto":
+        if not self._is_auto_mode():
             self._append_log("请先切换到自动化测试模式。")
             return
         self.send_command()
@@ -496,56 +473,14 @@ class MainWindow(QMainWindow):
         checks = [
             ("CDR delay", config.auto_cdr_delay_start, config.auto_cdr_delay_end),
             ("EQ offset", config.auto_eq_offset_start, config.auto_eq_offset_end),
-            ("EQ dg0 enable", config.auto_eq_dg0_enable_start, config.auto_eq_dg0_enable_end),
             ("EQ sr0", config.auto_eq_sr0_start, config.auto_eq_sr0_end),
-            ("EQ dg1 enable", config.auto_eq_dg1_enable_start, config.auto_eq_dg1_enable_end),
             ("EQ sr1", config.auto_eq_sr1_start, config.auto_eq_sr1_end),
-            ("EQ bw", config.auto_eq_bw_start, config.auto_eq_bw_end),
         ]
         errors: list[str] = []
         for name, start, end in checks:
             if start > end:
                 errors.append(f"- {name}: 开始值({start}) 不能大于结束值({end})")
         return errors
-
-
-class _ModeSelectCheckGroup(QWidget):
-    _LABEL_TO_VALUE = {"单步调试": "manual", "自动化测试": "auto"}
-    _VALUE_TO_LABEL = {value: label for label, value in _LABEL_TO_VALUE.items()}
-
-    def __init__(self, *, default: str = "manual") -> None:
-        super().__init__()
-        self._button_group = QButtonGroup(self)
-        self._button_group.setExclusive(True)
-
-        layout = QHBoxLayout()
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
-        self._checks: dict[str, QCheckBox] = {}
-        for label in self._LABEL_TO_VALUE:
-            check = QCheckBox(label)
-            self._button_group.addButton(check)
-            self._checks[label] = check
-            layout.addWidget(check)
-        layout.addStretch(1)
-        self.setLayout(layout)
-
-        self.select(default)
-
-    @property
-    def selected_text(self) -> str:
-        checked = self._button_group.checkedButton()
-        if checked is None:
-            return "manual"
-        return self._LABEL_TO_VALUE[checked.text()]
-
-    @property
-    def selection_changed(self):
-        return self._button_group.buttonClicked
-
-    def select(self, value: str) -> None:
-        label = self._VALUE_TO_LABEL.get(value, "单步调试")
-        self._checks[label].setChecked(True)
 
 
 class _SingleSelectCheckGroup(QWidget):
@@ -573,10 +508,6 @@ class _SingleSelectCheckGroup(QWidget):
     def selected_text(self) -> str:
         checked = self._button_group.checkedButton()
         return checked.text() if checked is not None else ""
-
-    @property
-    def selection_changed(self):
-        return self._button_group.buttonClicked
 
     def select(self, value: str) -> None:
         target = self._checks.get(value)
