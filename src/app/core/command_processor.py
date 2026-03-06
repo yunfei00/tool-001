@@ -184,20 +184,62 @@ class CommandProcessor:
     def _step_candidates(self, step: str, config: AppConfig) -> list[int]:
         if step == "cdr delay":
             cdr_max = 254 if config.is_dphy else 31
-            return list(range(0, cdr_max + 1))
+            return self._inclusive_range(
+                start=config.auto_cdr_delay_start,
+                end=config.auto_cdr_delay_end,
+                minimum=0,
+                maximum=cdr_max,
+            )
         if step == "eq offset":
-            return list(range(-31, 32))
+            return self._inclusive_range(
+                start=config.auto_eq_offset_start,
+                end=config.auto_eq_offset_end,
+                minimum=-31,
+                maximum=31,
+            )
         if step == "eq dg0 enable":
-            return [0, 1]
+            return self._inclusive_range(
+                start=config.auto_eq_dg0_enable_start,
+                end=config.auto_eq_dg0_enable_end,
+                minimum=0,
+                maximum=1,
+            )
         if step == "eq sr0":
-            return list(range(0, 16))
+            return self._inclusive_range(
+                start=config.auto_eq_sr0_start,
+                end=config.auto_eq_sr0_end,
+                minimum=0,
+                maximum=15,
+            )
         if step == "eq dg1 enable":
-            return [0, 1]
+            return self._inclusive_range(
+                start=config.auto_eq_dg1_enable_start,
+                end=config.auto_eq_dg1_enable_end,
+                minimum=0,
+                maximum=1,
+            )
         if step == "eq sr1":
-            return list(range(0, 16))
+            return self._inclusive_range(
+                start=config.auto_eq_sr1_start,
+                end=config.auto_eq_sr1_end,
+                minimum=0,
+                maximum=15,
+            )
         if step == "eq bw":
-            return [0, 1, 2, 3]
+            return self._inclusive_range(
+                start=config.auto_eq_bw_start,
+                end=config.auto_eq_bw_end,
+                minimum=0,
+                maximum=3,
+            )
         return [0]
+
+    @staticmethod
+    def _inclusive_range(*, start: int, end: int, minimum: int, maximum: int) -> list[int]:
+        bounded_start = min(max(start, minimum), maximum)
+        bounded_end = min(max(end, minimum), maximum)
+        lower, upper = sorted((bounded_start, bounded_end))
+        return list(range(lower, upper + 1))
 
     def _config_with_step_value(self, config: AppConfig, step: str, value: int) -> AppConfig:
         return AppConfig(
