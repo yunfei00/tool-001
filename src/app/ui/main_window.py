@@ -77,6 +77,7 @@ class MainWindow(QMainWindow):
         self._send_button = QPushButton("Send")
         self._load_button = QPushButton("Load Config")
         self._save_button = QPushButton("Save Config")
+        self._clear_log_button = QPushButton("Clear Logs")
 
         self._log_output = QTextEdit()
         self._log_output.setReadOnly(True)
@@ -137,6 +138,10 @@ class MainWindow(QMainWindow):
 
         log_group = QGroupBox("Log Output")
         log_layout = QVBoxLayout()
+        log_actions_layout = QHBoxLayout()
+        log_actions_layout.addStretch(1)
+        log_actions_layout.addWidget(self._clear_log_button)
+        log_layout.addLayout(log_actions_layout)
         log_layout.addWidget(self._log_output)
         log_group.setLayout(log_layout)
 
@@ -158,6 +163,7 @@ class MainWindow(QMainWindow):
         self._send_button.clicked.connect(self.send_command)
         self._command_input.returnPressed.connect(self.send_command)
         self._scan_adb_button.clicked.connect(self.scan_adb_devices)
+        self._clear_log_button.clicked.connect(self.clear_logs)
 
     def _collect_config(self) -> AppConfig:
         selected_mode = self._mode.selected_text
@@ -323,6 +329,9 @@ class MainWindow(QMainWindow):
 
     def _append_log(self, message: str) -> None:
         self._log_output.append(message)
+
+    def clear_logs(self) -> None:
+        self._log_output.clear()
 
     def load_config(self) -> None:
         config = self._config_manager.load()
