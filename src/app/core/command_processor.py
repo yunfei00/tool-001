@@ -4,6 +4,7 @@ from datetime import datetime
 from itertools import product
 from pathlib import Path
 from collections.abc import Callable
+import time
 import shlex
 import csv
 import subprocess
@@ -158,6 +159,7 @@ class CommandProcessor:
         config: AppConfig,
         step_text: str = "",
         progress_callback: Callable[[str], None] | None = None,
+        should_stop_callback: Callable[[], bool] | None = None,
     ) -> str:
         steps = self._parse_auto_steps(step_text)
         estimated_cases = self.estimate_auto_cases(config, step_text)
@@ -176,8 +178,8 @@ class CommandProcessor:
         if set(steps) == {"cdr delay", "eq offset"} and len(steps) == 2:
             cdr_path = output_dir / f"cdr_delay_{timestamp}.txt"
             eq_path = output_dir / f"eq_offset_{timestamp}.txt"
-            self._run_single_param_sweep("cdr delay", config, cdr_path, progress_callback)
-            self._run_single_param_sweep("eq offset", config, eq_path, progress_callback)
+            self._run_single_param_sweep("cdr delay", config, cdr_path, progress_callback, should_stop_callback)
+            self._run_single_param_sweep("eq offset", config, eq_path, progress_callback, should_stop_callback)
             return (
                 "自动化测试完成。\n"
                 f"cdr delay 输出文件: {cdr_path}\n"
@@ -185,7 +187,7 @@ class CommandProcessor:
             )
 
         csv_path = output_dir / f"multi_param_{timestamp}.csv"
-        row_count = self._run_multi_param_sweep(steps, config, csv_path, progress_callback)
+        row_count = self._run_multi_param_sweep(steps, config, csv_path, progress_callback, should_stop_callback)
         return f"自动化测试完成。共 {row_count} 行，CSV 输出: {csv_path}"
 
     def estimate_auto_cases(self, config: AppConfig, step_text: str = "") -> int:
@@ -209,17 +211,31 @@ class CommandProcessor:
         config: AppConfig,
         output_path: Path,
         progress_callback: Callable[[str], None] | None,
+        should_stop_callback: Callable[[], bool] | None,
     ) -> None:
         values = self._step_candidates(step, config)
         total = len(values)
         with output_path.open("w", encoding="utf-8") as handle:
             for index, value in enumerate(values, start=1):
+                if self._should_stop(should_stop_callback):
+                    self._emit_progress(progress_callback, "收到停止请求，终止当前自动化任务。")
+                    return
                 self._emit_progress(
                     progress_callback,
                     f"[{index}/{total}] 执行 {step}={value}",
                 )
                 run_config = self._config_with_step_value(config, step, value)
+                self._emit_progress(
+                    progress_callback,
+                    f"[{index}/{total}] 准备执行命令 step={step} value={value}",
+                )
+                start_ts = time.perf_counter()
                 result = self.send(step, run_config, start_stream=True)
+                elapsed = time.perf_counter() - start_ts
+                self._emit_progress(
+                    progress_callback,
+                    f"[{index}/{total}] 完成 step={step} value={value} 用时={elapsed:.2f}s",
+                )
                 handle.write(f"{step}={value}\n{result}\n\n")
 
     def _run_multi_param_sweep(
@@ -228,6 +244,7 @@ class CommandProcessor:
         config: AppConfig,
         csv_path: Path,
         progress_callback: Callable[[str], None] | None,
+        should_stop_callback: Callable[[], bool] | None,
     ) -> int:
         candidates = [self._step_candidates(step, config) for step in steps]
         header = [*steps, "final_result"]
@@ -240,6 +257,9 @@ class CommandProcessor:
             writer = csv.writer(handle)
             writer.writerow(header)
             for index, values in enumerate(product(*candidates), start=1):
+                if self._should_stop(should_stop_callback):
+                    self._emit_progress(progress_callback, "收到停止请求，终止当前自动化任务。")
+                    break
                 progress_detail = ", ".join(f"{step}={value}" for step, value in zip(steps, values))
                 self._emit_progress(
                     progress_callback,
@@ -248,11 +268,31 @@ class CommandProcessor:
                 run_config = config
                 final_result = ""
                 for step, value in zip(steps, values):
+                    if self._should_stop(should_stop_callback):
+                        self._emit_progress(progress_callback, "收到停止请求，终止当前自动化任务。")
+                        return count
                     run_config = self._config_with_step_value(run_config, step, value)
+                    self._emit_progress(
+                        progress_callback,
+                        f"[{index}/{total}] 开始执行子步骤 step={step} value={value}",
+                    )
+                    start_ts = time.perf_counter()
                     final_result = self.send(step, run_config, start_stream=True)
+                    elapsed = time.perf_counter() - start_ts
+                    self._emit_progress(
+                        progress_callback,
+                        f"[{index}/{total}] 子步骤完成 step={step} value={value} 用时={elapsed:.2f}s",
+                    )
                 writer.writerow([*values, final_result])
                 count += 1
         return count
+
+
+    @staticmethod
+    def _should_stop(should_stop_callback: Callable[[], bool] | None) -> bool:
+        if should_stop_callback is None:
+            return False
+        return should_stop_callback()
 
     @staticmethod
     def _emit_progress(progress_callback: Callable[[str], None] | None, message: str) -> None:

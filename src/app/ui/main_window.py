@@ -119,6 +119,8 @@ class MainWindow(QMainWindow):
         self._auto_load_button = QPushButton("Load Config")
         self._auto_save_button = QPushButton("Save Config")
         self._start_test_button = QPushButton("开始测试")
+        self._stop_test_button = QPushButton("停止测试")
+        self._stop_test_button.setEnabled(False)
 
         self._log_output = QTextEdit()
         self._log_output.setReadOnly(True)
@@ -219,7 +221,11 @@ class MainWindow(QMainWindow):
         auto_form.addRow("EQ sr1", self._auto_range_row(self._auto_eq_sr1_start, self._auto_eq_sr1_end))
         auto_form.addRow("EQ bw", self._auto_eq_bw)
         auto_layout.addLayout(auto_form)
-        auto_layout.addWidget(self._start_test_button)
+        auto_actions_layout = QHBoxLayout()
+        auto_actions_layout.addWidget(self._start_test_button)
+        auto_actions_layout.addWidget(self._stop_test_button)
+        auto_actions_layout.addStretch(1)
+        auto_layout.addLayout(auto_actions_layout)
         auto_group.setLayout(auto_layout)
 
         config_actions_layout = QHBoxLayout()
@@ -264,6 +270,7 @@ class MainWindow(QMainWindow):
         self._auto_save_button.clicked.connect(self.save_auto_config)
         self._auto_clear_log_button.clicked.connect(self.clear_auto_logs)
         self._start_test_button.clicked.connect(self._start_auto_test)
+        self._stop_test_button.clicked.connect(self._stop_auto_test)
 
     def _collect_manual_config(self) -> AppConfig:
         return AppConfig(
@@ -509,6 +516,7 @@ class MainWindow(QMainWindow):
         estimated_cases = self._command_processor.estimate_auto_cases(config, command)
 
         self._start_test_button.setEnabled(False)
+        self._stop_test_button.setEnabled(True)
         self._append_auto_log(
             "自动化测试已启动，请稍候..."
             f"（预计组合数={estimated_cases}）"
@@ -526,6 +534,14 @@ class MainWindow(QMainWindow):
         self._auto_test_worker.failed.connect(self._cleanup_auto_test_thread)
         self._auto_test_thread.start()
 
+    def _stop_auto_test(self) -> None:
+        if self._auto_test_worker is None:
+            self._append_auto_log("当前没有正在运行的自动化测试任务。")
+            return
+        self._auto_test_worker.request_stop()
+        self._stop_test_button.setEnabled(False)
+        self._append_auto_log("已发送停止请求，等待当前步骤结束...")
+
     def _on_auto_test_finished(self, response: str) -> None:
         self._append_auto_log(response)
         self._auto_command_input.clear()
@@ -540,6 +556,7 @@ class MainWindow(QMainWindow):
         self._auto_test_thread = None
         self._auto_test_worker = None
         self._start_test_button.setEnabled(True)
+        self._stop_test_button.setEnabled(False)
 
     @staticmethod
     def _auto_range_errors(config: AppConfig) -> list[str]:
@@ -566,13 +583,23 @@ class _AutoTestWorker(QObject):
         self._command_processor = command_processor
         self._config = config
         self._command = command
+        self._stop_requested = False
+
+    def request_stop(self) -> None:
+        self._stop_requested = True
+        self.progress.emit("停止请求已接收。")
+
+    def _should_stop(self) -> bool:
+        return self._stop_requested
 
     def run(self) -> None:
+        self.progress.emit("自动化任务线程已启动。")
         try:
             response = self._command_processor.run_automated_test(
                 self._config,
                 self._command,
                 progress_callback=self.progress.emit,
+                should_stop_callback=self._should_stop,
             )
         except Exception as error:  # noqa: BLE001
             self.failed.emit(str(error))
