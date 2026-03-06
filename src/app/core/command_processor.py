@@ -77,6 +77,29 @@ class CommandProcessor:
 
         return "\n".join(lines)
 
+    def start_stream_debug(self, config: AppConfig) -> str:
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        adb_device = config.adb_device
+        if not adb_device:
+            return f"[{timestamp}] No adb device selected."
+
+        lines: list[str] = []
+        for sensor_idx, sensor_mode in self._build_targets(config):
+            try:
+                self._start_stream(adb_device=adb_device, sensor_idx=sensor_idx, sensor_mode=sensor_mode)
+            except Exception as error:  # noqa: BLE001
+                lines.append(
+                    f"[{timestamp}] serial={adb_device} sensor_idx={sensor_idx} "
+                    f"sensor_mode={sensor_mode} START_STREAM FAIL: {error}"
+                )
+                continue
+
+            lines.append(
+                f"[{timestamp}] serial={adb_device} sensor_idx={sensor_idx} "
+                f"sensor_mode={sensor_mode} START_STREAM SUCCESS"
+            )
+        return "\n".join(lines)
+
     def _start_stream(self, *, adb_device: str, sensor_idx: int, sensor_mode: int) -> None:
         sentest_path = self._SENTEST_LOCAL_PATH
         if not sentest_path.exists():
