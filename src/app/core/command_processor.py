@@ -198,12 +198,8 @@ class CommandProcessor:
                 maximum=31,
             )
         if step == "eq dg0 enable":
-            return self._inclusive_range(
-                start=config.auto_eq_dg0_enable_start,
-                end=config.auto_eq_dg0_enable_end,
-                minimum=0,
-                maximum=1,
-            )
+            values = config.auto_eq_dg0_enable_values
+            return values or [0, 1]
         if step == "eq sr0":
             return self._inclusive_range(
                 start=config.auto_eq_sr0_start,
@@ -212,12 +208,8 @@ class CommandProcessor:
                 maximum=15,
             )
         if step == "eq dg1 enable":
-            return self._inclusive_range(
-                start=config.auto_eq_dg1_enable_start,
-                end=config.auto_eq_dg1_enable_end,
-                minimum=0,
-                maximum=1,
-            )
+            values = config.auto_eq_dg1_enable_values
+            return values or [0, 1]
         if step == "eq sr1":
             return self._inclusive_range(
                 start=config.auto_eq_sr1_start,
@@ -226,12 +218,8 @@ class CommandProcessor:
                 maximum=15,
             )
         if step == "eq bw":
-            return self._inclusive_range(
-                start=config.auto_eq_bw_start,
-                end=config.auto_eq_bw_end,
-                minimum=0,
-                maximum=3,
-            )
+            values = config.auto_eq_bw_values
+            return values or [0, 1, 2, 3]
         return [0]
 
     @staticmethod
@@ -263,9 +251,10 @@ class CommandProcessor:
             return [(config.sensor_idx, sensor_mode)]
 
         sensor_modes = config.sensor_mode or [0, 1, 2]
+        sensor_indexes = config.auto_sensor_idx or list(self._AUTO_SENSOR_INDEXES)
         return [
             (sensor_idx, sensor_mode)
-            for sensor_idx in self._AUTO_SENSOR_INDEXES
+            for sensor_idx in sensor_indexes
             for sensor_mode in sensor_modes
         ]
 

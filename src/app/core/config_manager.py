@@ -11,6 +11,7 @@ class AppConfig:
     adb_device: str | None = None
     is_dphy: bool = False
     sensor_idx: int = 1
+    auto_sensor_idx: list[int] | None = None
     sensor_mode: list[int] | None = None
     cdr_delay_start: int = 0
     eq_offset: int = 0
@@ -25,14 +26,17 @@ class AppConfig:
     auto_eq_offset_end: int = 31
     auto_eq_dg0_enable_start: int = 0
     auto_eq_dg0_enable_end: int = 1
+    auto_eq_dg0_enable_values: list[int] | None = None
     auto_eq_sr0_start: int = 0
     auto_eq_sr0_end: int = 15
     auto_eq_dg1_enable_start: int = 0
     auto_eq_dg1_enable_end: int = 1
+    auto_eq_dg1_enable_values: list[int] | None = None
     auto_eq_sr1_start: int = 0
     auto_eq_sr1_end: int = 15
     auto_eq_bw_start: int = 0
     auto_eq_bw_end: int = 3
+    auto_eq_bw_values: list[int] | None = None
 
 
 class ConfigManager:
@@ -56,6 +60,7 @@ class ConfigManager:
             adb_device=self._normalize_adb_device(raw_data.get("adb_device")),
             is_dphy=is_dphy,
             sensor_idx=self._normalize_sensor_idx(raw_data.get("sensor_idx")),
+            auto_sensor_idx=self._normalize_sensor_indexes(raw_data.get("auto_sensor_idx")),
             sensor_mode=self._normalize_sensor_modes(raw_data.get("sensor_mode")),
             cdr_delay_start=self._normalize_cdr_delay_start(raw_data.get("cdr_delay_start"), is_dphy),
             eq_offset=self._normalize_integer(raw_data.get("eq_offset"), minimum=-31, maximum=31, default=0),
@@ -81,6 +86,9 @@ class ConfigManager:
             auto_eq_dg0_enable_end=self._normalize_integer(
                 raw_data.get("auto_eq_dg0_enable_end"), minimum=0, maximum=1, default=1
             ),
+            auto_eq_dg0_enable_values=self._normalize_integer_list(
+                raw_data.get("auto_eq_dg0_enable_values"), allowed={0, 1}
+            ),
             auto_eq_sr0_start=self._normalize_integer(
                 raw_data.get("auto_eq_sr0_start"), minimum=0, maximum=15, default=0
             ),
@@ -93,6 +101,9 @@ class ConfigManager:
             auto_eq_dg1_enable_end=self._normalize_integer(
                 raw_data.get("auto_eq_dg1_enable_end"), minimum=0, maximum=1, default=1
             ),
+            auto_eq_dg1_enable_values=self._normalize_integer_list(
+                raw_data.get("auto_eq_dg1_enable_values"), allowed={0, 1}
+            ),
             auto_eq_sr1_start=self._normalize_integer(
                 raw_data.get("auto_eq_sr1_start"), minimum=0, maximum=15, default=0
             ),
@@ -104,6 +115,9 @@ class ConfigManager:
             ),
             auto_eq_bw_end=self._normalize_integer(
                 raw_data.get("auto_eq_bw_end"), minimum=0, maximum=3, default=3
+            ),
+            auto_eq_bw_values=self._normalize_integer_list(
+                raw_data.get("auto_eq_bw_values"), allowed={0, 1, 2, 3}
             ),
         )
 
@@ -126,6 +140,10 @@ class ConfigManager:
         if sensor_idx in cls._SENSOR_INDEXES:
             return sensor_idx
         return 1
+
+    @classmethod
+    def _normalize_sensor_indexes(cls, raw_sensor_indexes: object) -> list[int] | None:
+        return cls._normalize_integer_list(raw_sensor_indexes, allowed=set(cls._SENSOR_INDEXES))
 
     @staticmethod
     def _normalize_adb_device(raw_adb_device: object) -> str | None:
@@ -156,6 +174,27 @@ class ConfigManager:
         if not normalized:
             return None
 
+        return sorted(set(normalized))
+
+    @staticmethod
+    def _normalize_integer_list(raw_values: object, *, allowed: set[int]) -> list[int] | None:
+        if raw_values is None:
+            return None
+        if isinstance(raw_values, list):
+            values = raw_values
+        else:
+            values = [raw_values]
+
+        normalized: list[int] = []
+        for value in values:
+            try:
+                integer_value = int(value)
+            except (TypeError, ValueError):
+                continue
+            if integer_value in allowed:
+                normalized.append(integer_value)
+        if not normalized:
+            return None
         return sorted(set(normalized))
 
     @staticmethod
