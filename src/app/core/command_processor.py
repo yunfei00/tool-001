@@ -29,13 +29,13 @@ class CommandProcessor:
         "eq bw": "EQ_BW",
     }
     _DEFAULT_AUTO_STEPS = (
+        "cdr delay",
+        "eq offset",
         "eq dg0 enable",
         "eq sr0",
         "eq dg1 enable",
         "eq sr1",
         "eq bw",
-        "cdr delay",
-        "eq offset",
     )
     _SENTEST_LOCAL_PATH = Path("tool") / "sentest_v4l2"
     _SENTEST_REMOTE_PATH = "/data/local/tmp/sentest_v4l2"
@@ -216,7 +216,7 @@ class CommandProcessor:
 
     @staticmethod
     def _execution_steps(steps: list[str]) -> list[str]:
-        """Keep cdr delay and eq offset at the end while preserving order for others."""
+        """Keep user-specified step order while filtering duplicates and non-register steps."""
         seen: set[str] = set()
         ordered: list[str] = []
         for step in steps:
@@ -224,10 +224,7 @@ class CommandProcessor:
                 continue
             seen.add(step)
             ordered.append(step)
-
-        trailing = [step for step in ("cdr delay", "eq offset") if step in ordered]
-        leading = [step for step in ordered if step not in {"cdr delay", "eq offset"}]
-        return [*leading, *trailing]
+        return ordered
 
     def _run_single_param_sweep(
         self,
