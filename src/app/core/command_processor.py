@@ -38,7 +38,7 @@ class CommandProcessor:
     _SENTEST_LOCAL_PATH = Path("tool") / "sentest_v412"
     _SENTEST_REMOTE_PATH = "/data/local/tmp/sentest_v412"
 
-    def send(self, command: str, config: AppConfig) -> str:
+    def send(self, command: str, config: AppConfig, *, start_stream: bool = False) -> str:
         timestamp = datetime.now().strftime("%H:%M:%S")
         adb_device = config.adb_device
         if not adb_device:
@@ -54,7 +54,8 @@ class CommandProcessor:
 
         for sensor_idx, sensor_mode in targets:
             try:
-                self._start_stream(adb_device=adb_device, sensor_idx=sensor_idx, sensor_mode=sensor_mode)
+                if start_stream:
+                    self._start_stream(adb_device=adb_device, sensor_idx=sensor_idx, sensor_mode=sensor_mode)
                 line = self._send_to_target(
                     command=command,
                     config=config,
@@ -160,7 +161,7 @@ class CommandProcessor:
         with output_path.open("w", encoding="utf-8") as handle:
             for value in self._step_candidates(step, config):
                 run_config = self._config_with_step_value(config, step, value)
-                result = self.send(step, run_config)
+                result = self.send(step, run_config, start_stream=True)
                 handle.write(f"{step}={value}\n{result}\n\n")
 
     def _run_multi_param_sweep(self, steps: list[str], config: AppConfig, csv_path: Path) -> int:
@@ -175,7 +176,7 @@ class CommandProcessor:
                 final_result = ""
                 for step, value in zip(steps, values):
                     run_config = self._config_with_step_value(run_config, step, value)
-                    final_result = self.send(step, run_config)
+                    final_result = self.send(step, run_config, start_stream=True)
                 writer.writerow([*values, final_result])
                 count += 1
         return count
