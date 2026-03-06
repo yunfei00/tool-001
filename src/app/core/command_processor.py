@@ -161,13 +161,14 @@ class CommandProcessor:
         progress_callback: Callable[[str], None] | None = None,
         should_stop_callback: Callable[[], bool] | None = None,
     ) -> str:
-        steps = self._parse_auto_steps(step_text)
+        display_steps = self._parse_auto_steps(step_text)
+        steps = self._execution_steps(display_steps)
         estimated_cases = self.estimate_auto_cases(config, step_text)
         self._emit_progress(
             progress_callback,
             (
                 "自动化任务已创建："
-                f"steps={', '.join(steps)}；"
+                f"steps={', '.join(display_steps)}；"
                 f"预计组合数={estimated_cases}。"
             ),
         )
@@ -191,7 +192,7 @@ class CommandProcessor:
         return f"自动化测试完成。共 {row_count} 行，CSV 输出: {csv_path}"
 
     def estimate_auto_cases(self, config: AppConfig, step_text: str = "") -> int:
-        steps = self._parse_auto_steps(step_text)
+        steps = self._execution_steps(self._parse_auto_steps(step_text))
         candidates = [self._step_candidates(step, config) for step in steps]
         target_count = len(self._build_targets(config))
         total = 1
@@ -203,16 +204,23 @@ class CommandProcessor:
         if not step_text.strip():
             return list(self._DEFAULT_AUTO_STEPS)
         parts = [part.strip().lower() for part in step_text.replace(";", ",").split(",")]
-        steps = [step for step in parts if step in self._STEP_REGISTER_MAP]
-        return self._ordered_steps(steps or list(self._DEFAULT_AUTO_STEPS))
+        valid_steps = {*self._STEP_REGISTER_MAP, *self._NON_EYE_STEPS}
+        steps: list[str] = []
+        seen: set[str] = set()
+        for part in parts:
+            if part not in valid_steps or part in seen:
+                continue
+            seen.add(part)
+            steps.append(part)
+        return steps or list(self._DEFAULT_AUTO_STEPS)
 
     @staticmethod
-    def _ordered_steps(steps: list[str]) -> list[str]:
+    def _execution_steps(steps: list[str]) -> list[str]:
         """Keep cdr delay and eq offset at the end while preserving order for others."""
         seen: set[str] = set()
         ordered: list[str] = []
         for step in steps:
-            if step in seen:
+            if step in seen or step in CommandProcessor._NON_EYE_STEPS:
                 continue
             seen.add(step)
             ordered.append(step)
@@ -236,7 +244,7 @@ class CommandProcessor:
             index = 0
             for sensor_idx, sensor_mode in targets:
                 run_config = self._config_with_target(config, sensor_idx=sensor_idx, sensor_mode=sensor_mode)
-                stream_started = False
+                self._start_stream_for_config(run_config)
                 applied_value: int | None = None
                 for value in values:
                     if self._should_stop(should_stop_callback):
@@ -259,8 +267,7 @@ class CommandProcessor:
                         f"[{index}/{total}] 准备执行命令 step={step} value={value}",
                     )
                     start_ts = time.perf_counter()
-                    result = self.send(step, run_config, start_stream=not stream_started)
-                    stream_started = True
+                    result = self.send(step, run_config, start_stream=False)
                     elapsed = time.perf_counter() - start_ts
                     self._emit_progress(
                         progress_callback,
@@ -291,8 +298,8 @@ class CommandProcessor:
             index = 0
             for sensor_idx, sensor_mode in targets:
                 run_config = self._config_with_target(config, sensor_idx=sensor_idx, sensor_mode=sensor_mode)
+                self._start_stream_for_config(run_config)
                 applied_values: dict[str, int] = {}
-                stream_started = False
                 for values in product(*candidates):
                     if self._should_stop(should_stop_callback):
                         self._emit_progress(progress_callback, "收到停止请求，终止当前自动化任务。")
@@ -320,8 +327,7 @@ class CommandProcessor:
                             f"[{index}/{total}] 开始执行子步骤 step={step} value={value}",
                         )
                         start_ts = time.perf_counter()
-                        final_result = self.send(step, run_config, start_stream=not stream_started)
-                        stream_started = True
+                        final_result = self.send(step, run_config, start_stream=False)
                         elapsed = time.perf_counter() - start_ts
                         self._emit_progress(
                             progress_callback,
@@ -331,6 +337,13 @@ class CommandProcessor:
                     writer.writerow([sensor_idx, sensor_mode, *values, final_result])
                     count += 1
         return count
+
+    def _start_stream_for_config(self, config: AppConfig) -> None:
+        adb_device = config.adb_device
+        if not adb_device:
+            raise RuntimeError("No adb device selected.")
+        sensor_mode = config.sensor_mode[0] if config.sensor_mode else 0
+        self._start_stream(adb_device=adb_device, sensor_idx=config.sensor_idx, sensor_mode=sensor_mode)
 
 
     @staticmethod
