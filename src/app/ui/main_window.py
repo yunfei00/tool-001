@@ -47,10 +47,6 @@ class MainWindow(QMainWindow):
         self._scan_adb_button = QPushButton("Scan ADB")
         self._adb_devices: list[str] = []
 
-        self._auto_adb_device_combo = QComboBox()
-        self._auto_scan_adb_button = QPushButton("Scan ADB")
-        self._auto_adb_devices: list[str] = []
-
         self._manual_sensor_idx = _SingleSelectCheckGroup([str(value) for value in self._SENSOR_INDEX_OPTIONS], default="1")
         self._manual_sensor_mode = _SingleSelectCheckGroup(["0", "1", "2"], default="0")
         self._auto_sensor_idx = _MultiSelectCheckGroup([str(value) for value in self._SENSOR_INDEX_OPTIONS], default=["1"])
@@ -143,12 +139,19 @@ class MainWindow(QMainWindow):
         self.load_auto_config()
 
     def _build_ui(self) -> None:
+        adb_group = QGroupBox("ADB Device")
+        adb_layout = QHBoxLayout()
+        adb_layout.addWidget(self._adb_device_combo)
+        adb_layout.addWidget(self._scan_adb_button)
+        adb_group.setLayout(adb_layout)
+
         self._mode_tabs = QTabWidget()
         self._mode_tabs.addTab(self._build_manual_tab(), "单步调试")
         self._mode_tabs.addTab(self._build_auto_tab(), "自动化测试")
 
         container = QWidget()
         root_layout = QVBoxLayout()
+        root_layout.addWidget(adb_group)
         root_layout.addWidget(self._mode_tabs)
         container.setLayout(root_layout)
         self.setCentralWidget(container)
@@ -156,23 +159,18 @@ class MainWindow(QMainWindow):
     def _build_manual_tab(self) -> QWidget:
         tab = QWidget()
 
-        config_group = QGroupBox("Configuration")
-        config_form = QFormLayout()
-        adb_device_row = QWidget()
-        adb_device_layout = QHBoxLayout()
-        adb_device_layout.setContentsMargins(0, 0, 0, 0)
-        adb_device_layout.addWidget(self._adb_device_combo)
-        adb_device_layout.addWidget(self._scan_adb_button)
-        adb_device_row.setLayout(adb_device_layout)
-        config_form.addRow("ADB Device", adb_device_row)
-        config_form.addRow("CDR delay", self._with_step_send(self._cdr_delay_start, "cdr delay", self._is_dphy))
-        config_form.addRow("EQ offset", self._with_step_send(self._eq_offset, "eq offset"))
-        config_form.addRow("EQ dg0 enable", self._with_step_send(self._eq_dg0_enable, "eq dg0 enable"))
-        config_form.addRow("EQ sr0", self._with_step_send(self._eq_sr0, "eq sr0"))
-        config_form.addRow("EQ dg1 enable", self._with_step_send(self._eq_dg1_enable, "eq dg1 enable"))
-        config_form.addRow("EQ sr1", self._with_step_send(self._eq_sr1, "eq sr1"))
-        config_form.addRow("EQ bw", self._with_step_send(self._eq_bw, "eq bw"))
-        config_group.setLayout(config_form)
+        manual_group = QGroupBox("Manual Parameters")
+        manual_form = QFormLayout()
+        manual_form.addRow("Sensor idx", self._manual_sensor_idx)
+        manual_form.addRow("Sensor mode", self._manual_sensor_mode)
+        manual_form.addRow("CDR delay", self._with_step_send(self._cdr_delay_start, "cdr delay", self._is_dphy))
+        manual_form.addRow("EQ offset", self._with_step_send(self._eq_offset, "eq offset"))
+        manual_form.addRow("EQ dg0 enable", self._with_step_send(self._eq_dg0_enable, "eq dg0 enable"))
+        manual_form.addRow("EQ sr0", self._with_step_send(self._eq_sr0, "eq sr0"))
+        manual_form.addRow("EQ dg1 enable", self._with_step_send(self._eq_dg1_enable, "eq dg1 enable"))
+        manual_form.addRow("EQ sr1", self._with_step_send(self._eq_sr1, "eq sr1"))
+        manual_form.addRow("EQ bw", self._with_step_send(self._eq_bw, "eq bw"))
+        manual_group.setLayout(manual_form)
 
         detail_group = QGroupBox("Parameter Details")
         detail_layout = QVBoxLayout()
@@ -180,17 +178,13 @@ class MainWindow(QMainWindow):
         detail_group.setLayout(detail_layout)
 
         top_layout = QHBoxLayout()
-        top_layout.addWidget(config_group, stretch=2)
+        top_layout.addWidget(manual_group, stretch=2)
         top_layout.addWidget(detail_group, stretch=3)
 
-        mode_group = QGroupBox("Mode")
-        mode_layout = QVBoxLayout()
-        mode_form = QFormLayout()
-        mode_form.addRow("Sensor idx", self._manual_sensor_idx)
-        mode_form.addRow("Sensor mode", self._manual_sensor_mode)
-        mode_layout.addWidget(self._manual_mode_notice)
-        mode_layout.addLayout(mode_form)
-        mode_group.setLayout(mode_layout)
+        notice_group = QGroupBox("Notice")
+        notice_layout = QVBoxLayout()
+        notice_layout.addWidget(self._manual_mode_notice)
+        notice_group.setLayout(notice_layout)
 
         config_actions_layout = QHBoxLayout()
         config_actions_layout.addWidget(self._load_button)
@@ -214,7 +208,7 @@ class MainWindow(QMainWindow):
 
         layout = QVBoxLayout()
         layout.addLayout(top_layout)
-        layout.addWidget(mode_group)
+        layout.addWidget(notice_group)
         layout.addLayout(config_actions_layout)
         layout.addWidget(command_group)
         layout.addWidget(log_group, stretch=1)
@@ -224,42 +218,29 @@ class MainWindow(QMainWindow):
     def _build_auto_tab(self) -> QWidget:
         tab = QWidget()
 
-        config_group = QGroupBox("Configuration")
-        config_form = QFormLayout()
-        adb_device_row = QWidget()
-        adb_device_layout = QHBoxLayout()
-        adb_device_layout.setContentsMargins(0, 0, 0, 0)
-        adb_device_layout.addWidget(self._auto_adb_device_combo)
-        adb_device_layout.addWidget(self._auto_scan_adb_button)
-        adb_device_row.setLayout(adb_device_layout)
-        config_form.addRow("ADB Device", adb_device_row)
-        config_form.addRow("DPHY", self._auto_is_dphy)
-        config_group.setLayout(config_form)
-
         detail_group = QGroupBox("Parameter Details")
         detail_layout = QVBoxLayout()
         detail_layout.addWidget(self._auto_param_detail)
         detail_group.setLayout(detail_layout)
 
         top_layout = QHBoxLayout()
-        top_layout.addWidget(config_group, stretch=2)
-        top_layout.addWidget(detail_group, stretch=3)
+        top_layout.addWidget(detail_group, stretch=1)
 
-        mode_group = QGroupBox("Mode")
-        mode_layout = QVBoxLayout()
-        mode_form = QFormLayout()
-        mode_form.addRow("Sensor idx", self._auto_sensor_idx)
-        mode_form.addRow("Sensor mode", self._auto_sensor_mode)
-        mode_form.addRow("CDR delay", self._auto_range_row(self._auto_cdr_delay_start, self._auto_cdr_delay_end))
-        mode_form.addRow("EQ offset", self._auto_range_row(self._auto_eq_offset_start, self._auto_eq_offset_end))
-        mode_form.addRow("EQ dg0 enable", self._auto_eq_dg0_enable)
-        mode_form.addRow("EQ sr0", self._auto_range_row(self._auto_eq_sr0_start, self._auto_eq_sr0_end))
-        mode_form.addRow("EQ dg1 enable", self._auto_eq_dg1_enable)
-        mode_form.addRow("EQ sr1", self._auto_range_row(self._auto_eq_sr1_start, self._auto_eq_sr1_end))
-        mode_form.addRow("EQ bw", self._auto_eq_bw)
-        mode_layout.addLayout(mode_form)
-        mode_layout.addWidget(self._start_test_button)
-        mode_group.setLayout(mode_layout)
+        auto_group = QGroupBox("Auto Parameters")
+        auto_layout = QVBoxLayout()
+        auto_form = QFormLayout()
+        auto_form.addRow("Sensor idx", self._auto_sensor_idx)
+        auto_form.addRow("Sensor mode", self._auto_sensor_mode)
+        auto_form.addRow("CDR delay", self._auto_range_row(self._auto_cdr_delay_start, self._auto_cdr_delay_end, self._auto_is_dphy))
+        auto_form.addRow("EQ offset", self._auto_range_row(self._auto_eq_offset_start, self._auto_eq_offset_end))
+        auto_form.addRow("EQ dg0 enable", self._auto_eq_dg0_enable)
+        auto_form.addRow("EQ sr0", self._auto_range_row(self._auto_eq_sr0_start, self._auto_eq_sr0_end))
+        auto_form.addRow("EQ dg1 enable", self._auto_eq_dg1_enable)
+        auto_form.addRow("EQ sr1", self._auto_range_row(self._auto_eq_sr1_start, self._auto_eq_sr1_end))
+        auto_form.addRow("EQ bw", self._auto_eq_bw)
+        auto_layout.addLayout(auto_form)
+        auto_layout.addWidget(self._start_test_button)
+        auto_group.setLayout(auto_layout)
 
         config_actions_layout = QHBoxLayout()
         config_actions_layout.addWidget(self._auto_load_button)
@@ -282,7 +263,7 @@ class MainWindow(QMainWindow):
 
         layout = QVBoxLayout()
         layout.addLayout(top_layout)
-        layout.addWidget(mode_group)
+        layout.addWidget(auto_group)
         layout.addLayout(config_actions_layout)
         layout.addWidget(command_group)
         layout.addWidget(log_group, stretch=1)
@@ -297,12 +278,11 @@ class MainWindow(QMainWindow):
         self._save_button.clicked.connect(self.save_manual_config)
         self._send_button.clicked.connect(self.send_manual_command)
         self._command_input.returnPressed.connect(self.send_manual_command)
-        self._scan_adb_button.clicked.connect(self.scan_manual_adb_devices)
+        self._scan_adb_button.clicked.connect(self.scan_adb_devices)
         self._clear_log_button.clicked.connect(self.clear_manual_logs)
 
         self._auto_load_button.clicked.connect(self.load_auto_config)
         self._auto_save_button.clicked.connect(self.save_auto_config)
-        self._auto_scan_adb_button.clicked.connect(self.scan_auto_adb_devices)
         self._auto_clear_log_button.clicked.connect(self.clear_auto_logs)
         self._start_test_button.clicked.connect(self._start_auto_test)
 
@@ -337,7 +317,7 @@ class MainWindow(QMainWindow):
     def _collect_auto_config(self) -> AppConfig:
         return AppConfig(
             mode="auto",
-            adb_device=self._selected_auto_adb_device(),
+            adb_device=self._selected_adb_device(),
             is_dphy=self._auto_is_dphy.isChecked(),
             sensor_idx=int(self._manual_sensor_idx.selected_text),
             auto_sensor_idx=[int(value) for value in self._auto_sensor_idx.selected_texts],
@@ -363,7 +343,7 @@ class MainWindow(QMainWindow):
         )
 
     def _apply_manual_config(self, config: AppConfig) -> None:
-        self._refresh_manual_adb_devices(preferred=config.adb_device, should_log=False)
+        self._refresh_adb_devices(preferred=config.adb_device, should_log=False)
         self._is_dphy.setChecked(config.is_dphy)
         self._manual_sensor_idx.select(str(config.sensor_idx))
         self._manual_sensor_mode.select(str(config.sensor_mode[0]) if config.sensor_mode else "0")
@@ -377,7 +357,7 @@ class MainWindow(QMainWindow):
         self._update_mode_dependent_fields()
 
     def _apply_auto_config(self, config: AppConfig) -> None:
-        self._refresh_auto_adb_devices(preferred=config.adb_device, should_log=False)
+        self._refresh_adb_devices(preferred=config.adb_device, should_log=False)
         self._auto_is_dphy.setChecked(config.is_dphy)
         self._auto_sensor_mode.select_many([str(value) for value in (config.sensor_mode or [0])])
         self._auto_sensor_idx.select_many([str(value) for value in (config.auto_sensor_idx or [1])])
@@ -398,19 +378,19 @@ class MainWindow(QMainWindow):
         selected_modes = [int(value) for value in self._auto_sensor_mode.selected_texts]
         return selected_modes or [0]
 
-    def _selected_manual_adb_device(self) -> str | None:
+    def _selected_adb_device(self) -> str | None:
         current = self._adb_device_combo.currentText().strip()
         if not current or current not in self._adb_devices:
             return None
         return current
 
-    def _selected_auto_adb_device(self) -> str | None:
-        current = self._auto_adb_device_combo.currentText().strip()
-        if not current or current not in self._auto_adb_devices:
-            return None
-        return current
+    def _selected_manual_adb_device(self) -> str | None:
+        return self._selected_adb_device()
 
-    def _refresh_manual_adb_devices(self, *, preferred: str | None = None, should_log: bool = True) -> None:
+    def _selected_auto_adb_device(self) -> str | None:
+        return self._selected_adb_device()
+
+    def _refresh_adb_devices(self, *, preferred: str | None = None, should_log: bool = True) -> None:
         devices, error = self._adb_device_service.list_devices()
         self._adb_devices = devices
         self._adb_device_combo.clear()
@@ -421,38 +401,19 @@ class MainWindow(QMainWindow):
             if preferred and preferred in devices:
                 self._adb_device_combo.setCurrentText(preferred)
             if should_log:
-                self._append_manual_log(f"Found {len(devices)} adb device(s).")
+                message = f"Found {len(devices)} adb device(s)."
+                self._append_manual_log(message)
+                self._append_auto_log(message)
             return
 
         self._adb_device_combo.addItem("<no adb device>")
         self._adb_device_combo.setEnabled(False)
         if should_log:
             self._append_manual_log(f"ADB scan failed: {error}" if error else "No adb device found.")
-
-    def _refresh_auto_adb_devices(self, *, preferred: str | None = None, should_log: bool = True) -> None:
-        devices, error = self._adb_device_service.list_devices()
-        self._auto_adb_devices = devices
-        self._auto_adb_device_combo.clear()
-
-        if devices:
-            self._auto_adb_device_combo.addItems(devices)
-            self._auto_adb_device_combo.setEnabled(True)
-            if preferred and preferred in devices:
-                self._auto_adb_device_combo.setCurrentText(preferred)
-            if should_log:
-                self._append_auto_log(f"Found {len(devices)} adb device(s).")
-            return
-
-        self._auto_adb_device_combo.addItem("<no adb device>")
-        self._auto_adb_device_combo.setEnabled(False)
-        if should_log:
             self._append_auto_log(f"ADB scan failed: {error}" if error else "No adb device found.")
 
-    def scan_manual_adb_devices(self) -> None:
-        self._refresh_manual_adb_devices(should_log=True)
-
-    def scan_auto_adb_devices(self) -> None:
-        self._refresh_auto_adb_devices(should_log=True)
+    def scan_adb_devices(self) -> None:
+        self._refresh_adb_devices(should_log=True)
 
     def _update_mode_dependent_fields(self) -> None:
         manual_cdr_max = 254 if self._is_dphy.isChecked() else 31
@@ -516,7 +477,7 @@ class MainWindow(QMainWindow):
         row.setLayout(layout)
         return row
 
-    def _auto_range_row(self, start_widget: QWidget, end_widget: QWidget) -> QWidget:
+    def _auto_range_row(self, start_widget: QWidget, end_widget: QWidget, extra_widget: QWidget | None = None) -> QWidget:
         row = QWidget()
         layout = QHBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
@@ -524,6 +485,8 @@ class MainWindow(QMainWindow):
         layout.addWidget(start_widget)
         layout.addWidget(QLabel("结束"))
         layout.addWidget(end_widget)
+        if extra_widget is not None:
+            layout.addWidget(extra_widget)
         layout.addStretch(1)
         row.setLayout(layout)
         return row
