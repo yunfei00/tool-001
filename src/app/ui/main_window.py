@@ -126,12 +126,6 @@ class MainWindow(QMainWindow):
         self._auto_log_output = QTextEdit()
         self._auto_log_output.setReadOnly(True)
 
-        self._param_detail = QTextEdit()
-        self._param_detail.setReadOnly(True)
-
-        self._auto_param_detail = QTextEdit()
-        self._auto_param_detail.setReadOnly(True)
-
         self._step_send_buttons: list[QPushButton] = []
         self._auto_test_thread: QThread | None = None
         self._auto_test_worker: _AutoTestWorker | None = None
@@ -162,6 +156,11 @@ class MainWindow(QMainWindow):
     def _build_manual_tab(self) -> QWidget:
         tab = QWidget()
 
+        notice_group = QGroupBox("Notice")
+        notice_layout = QVBoxLayout()
+        notice_layout.addWidget(self._manual_mode_notice)
+        notice_group.setLayout(notice_layout)
+
         manual_group = QGroupBox("Manual Parameters")
         manual_form = QFormLayout()
         manual_form.addRow("Sensor idx", self._manual_sensor_idx)
@@ -174,20 +173,6 @@ class MainWindow(QMainWindow):
         manual_form.addRow("EQ sr1", self._with_step_send(self._eq_sr1, "eq sr1"))
         manual_form.addRow("EQ bw", self._with_step_send(self._eq_bw, "eq bw"))
         manual_group.setLayout(manual_form)
-
-        detail_group = QGroupBox("Parameter Details")
-        detail_layout = QVBoxLayout()
-        detail_layout.addWidget(self._param_detail)
-        detail_group.setLayout(detail_layout)
-
-        top_layout = QHBoxLayout()
-        top_layout.addWidget(manual_group, stretch=2)
-        top_layout.addWidget(detail_group, stretch=3)
-
-        notice_group = QGroupBox("Notice")
-        notice_layout = QVBoxLayout()
-        notice_layout.addWidget(self._manual_mode_notice)
-        notice_group.setLayout(notice_layout)
 
         config_actions_layout = QHBoxLayout()
         config_actions_layout.addWidget(self._load_button)
@@ -210,8 +195,8 @@ class MainWindow(QMainWindow):
         log_group.setLayout(log_layout)
 
         layout = QVBoxLayout()
-        layout.addLayout(top_layout)
         layout.addWidget(notice_group)
+        layout.addWidget(manual_group)
         layout.addLayout(config_actions_layout)
         layout.addWidget(command_group)
         layout.addWidget(log_group, stretch=1)
@@ -220,14 +205,6 @@ class MainWindow(QMainWindow):
 
     def _build_auto_tab(self) -> QWidget:
         tab = QWidget()
-
-        detail_group = QGroupBox("Parameter Details")
-        detail_layout = QVBoxLayout()
-        detail_layout.addWidget(self._auto_param_detail)
-        detail_group.setLayout(detail_layout)
-
-        top_layout = QHBoxLayout()
-        top_layout.addWidget(detail_group, stretch=1)
 
         auto_group = QGroupBox("Auto Parameters")
         auto_layout = QVBoxLayout()
@@ -265,7 +242,6 @@ class MainWindow(QMainWindow):
         log_group.setLayout(log_layout)
 
         layout = QVBoxLayout()
-        layout.addLayout(top_layout)
         layout.addWidget(auto_group)
         layout.addLayout(config_actions_layout)
         layout.addWidget(command_group)
@@ -431,39 +407,6 @@ class MainWindow(QMainWindow):
             self._auto_cdr_delay_start.setValue(auto_cdr_max)
         if self._auto_cdr_delay_end.value() > auto_cdr_max:
             self._auto_cdr_delay_end.setValue(auto_cdr_max)
-
-        self._refresh_param_details(manual_cdr_max, auto_cdr_max)
-
-    def _refresh_param_details(self, manual_cdr_max: int, auto_cdr_max: int) -> None:
-        manual_lines = [
-            "Tab1: 单步调试(manual)",
-            "- sensor idx: 单选 checkbox",
-            "- sensor mode: 单选 checkbox",
-            "",
-            "参数范围:",
-            f"- cdr delay: 0 ~ {manual_cdr_max}",
-            "- eq offset: -31 ~ 31",
-            "- eq sr0 / eq sr1: 0 ~ 15",
-            "",
-            "ADB Device 由 adb devices 获取。",
-        ]
-        self._param_detail.setPlainText("\n".join(manual_lines))
-
-        auto_lines = [
-            "Tab2: 自动化测试(auto)",
-            "- sensor idx: 多选 checkbox",
-            "- sensor mode: 多选 checkbox",
-            "- cdr delay / eq offset / eq sr0 / eq sr1: start-end 遍历",
-            "- eq dg0 enable / eq dg1 enable / eq bw: 多选 checkbox",
-            "",
-            "参数范围:",
-            f"- cdr delay: 0 ~ {auto_cdr_max}",
-            "- eq offset: -31 ~ 31",
-            "- eq sr0 / eq sr1: 0 ~ 15",
-            "",
-            "ADB Device 由 adb devices 获取。",
-        ]
-        self._auto_param_detail.setPlainText("\n".join(auto_lines))
 
     def _with_step_send(self, field: QWidget, command: str, extra_widget: QWidget | None = None) -> QWidget:
         row = QWidget()
