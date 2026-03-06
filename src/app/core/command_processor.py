@@ -100,12 +100,33 @@ class CommandProcessor:
             )
         return "\n".join(lines)
 
+    def stop_stream_debug(self, config: AppConfig) -> str:
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        adb_device = config.adb_device
+        if not adb_device:
+            return f"[{timestamp}] No adb device selected."
+
+        lines: list[str] = []
+        for sensor_idx, sensor_mode in self._build_targets(config):
+            try:
+                self._stop_stream(adb_device=adb_device)
+            except Exception as error:  # noqa: BLE001
+                lines.append(
+                    f"[{timestamp}] serial={adb_device} sensor_idx={sensor_idx} "
+                    f"sensor_mode={sensor_mode} STOP_STREAM FAIL: {error}"
+                )
+                continue
+
+            lines.append(
+                f"[{timestamp}] serial={adb_device} sensor_idx={sensor_idx} "
+                f"sensor_mode={sensor_mode} STOP_STREAM SUCCESS"
+            )
+        return "\n".join(lines)
+
     def _start_stream(self, *, adb_device: str, sensor_idx: int, sensor_mode: int) -> None:
         sentest_path = self._SENTEST_LOCAL_PATH
         if not sentest_path.exists():
             raise RuntimeError(f"Missing stream tool: {sentest_path}")
-
-        self._stop_stream(adb_device=adb_device)
 
         if not self._remote_tool_exists(adb_device=adb_device):
             push_cmd = ["adb", "-s", adb_device, "push", str(sentest_path), self._SENTEST_REMOTE_PATH]

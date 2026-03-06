@@ -115,6 +115,7 @@ class MainWindow(QMainWindow):
         self._save_button = QPushButton("Save Config")
         self._clear_log_button = QPushButton("Clear Logs")
         self._start_stream_debug_button = QPushButton("起流调试")
+        self._stop_stream_debug_button = QPushButton("停止流")
 
         self._auto_clear_log_button = QPushButton("Clear Logs")
         self._auto_load_button = QPushButton("Load Config")
@@ -187,6 +188,7 @@ class MainWindow(QMainWindow):
         command_layout.addWidget(self._command_input)
         command_layout.addWidget(self._send_button)
         command_layout.addWidget(self._start_stream_debug_button)
+        command_layout.addWidget(self._stop_stream_debug_button)
         command_group.setLayout(command_layout)
 
         log_group = QGroupBox("Log Output")
@@ -268,6 +270,7 @@ class MainWindow(QMainWindow):
         self._scan_adb_button.clicked.connect(self.scan_adb_devices)
         self._clear_log_button.clicked.connect(self.clear_manual_logs)
         self._start_stream_debug_button.clicked.connect(self.start_stream_debug)
+        self._stop_stream_debug_button.clicked.connect(self.stop_stream_debug)
 
         self._auto_load_button.clicked.connect(self.load_auto_config)
         self._auto_save_button.clicked.connect(self.save_auto_config)
@@ -507,6 +510,14 @@ class MainWindow(QMainWindow):
             return
 
         response = self._command_processor.start_stream_debug(self._collect_manual_config())
+        self._append_manual_log(response)
+
+    def stop_stream_debug(self) -> None:
+        if not self._selected_manual_adb_device():
+            self._append_manual_log("No adb device selected. Please scan and choose one device first.")
+            return
+
+        response = self._command_processor.stop_stream_debug(self._collect_manual_config())
         self._append_manual_log(response)
 
     def _start_auto_test(self) -> None:
