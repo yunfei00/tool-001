@@ -36,8 +36,8 @@ class CommandProcessor:
         "eq sr1",
         "eq bw",
     )
-    _SENTEST_LOCAL_PATH = Path("tool") / "sentest_v412"
-    _SENTEST_REMOTE_PATH = "/data/local/tmp/sentest_v412"
+    _SENTEST_LOCAL_PATH = Path("tool") / "sentest_v4l2"
+    _SENTEST_REMOTE_PATH = "/data/local/tmp/sentest_v4l2"
 
     def send(self, command: str, config: AppConfig, *, start_stream: bool = False) -> str:
         timestamp = datetime.now().strftime("%H:%M:%S")
@@ -79,11 +79,14 @@ class CommandProcessor:
         if not sentest_path.exists():
             raise RuntimeError(f"Missing stream tool: {sentest_path}")
 
-        push_cmd = ["adb", "-s", adb_device, "push", str(sentest_path), self._SENTEST_REMOTE_PATH]
-        push_result = subprocess.run(push_cmd, check=False, capture_output=True, text=True)
-        if push_result.returncode != 0:
-            output = (push_result.stdout or "") + (push_result.stderr or "")
-            raise RuntimeError(f"Push sentest_v412 failed: {output.strip()}")
+        self._stop_stream(adb_device=adb_device)
+
+        if not self._remote_tool_exists(adb_device=adb_device):
+            push_cmd = ["adb", "-s", adb_device, "push", str(sentest_path), self._SENTEST_REMOTE_PATH]
+            push_result = subprocess.run(push_cmd, check=False, capture_output=True, text=True)
+            if push_result.returncode != 0:
+                output = (push_result.stdout or "") + (push_result.stderr or "")
+                raise RuntimeError(f"Push sentest_v4l2 failed: {output.strip()}")
 
         chmod_cmd = ["adb", "-s", adb_device, "shell", f"chmod 755 {self._SENTEST_REMOTE_PATH}"]
         subprocess.run(chmod_cmd, check=False, capture_output=True, text=True)
@@ -101,9 +104,29 @@ class CommandProcessor:
             errors.append(f"{' '.join(stream_cmd)} -> {output}")
 
         raise RuntimeError(
-            "Start stream failed: sentest_v412 command returned non-zero. "
+            "Start stream failed: sentest_v4l2 command returned non-zero. "
             + " | ".join(errors)
         )
+
+    def _remote_tool_exists(self, *, adb_device: str) -> bool:
+        check_cmd = [
+            "adb",
+            "-s",
+            adb_device,
+            "shell",
+            f"if [ -f {self._SENTEST_REMOTE_PATH} ]; then echo __EXISTS__; fi",
+        ]
+        result = subprocess.run(check_cmd, check=False, capture_output=True, text=True)
+        return result.returncode == 0 and "__EXISTS__" in (result.stdout or "")
+
+    def _stop_stream(self, *, adb_device: str) -> None:
+        stop_commands = [
+            ["adb", "-s", adb_device, "shell", f"{self._SENTEST_REMOTE_PATH} --stop-stream"],
+            ["adb", "-s", adb_device, "shell", f"{self._SENTEST_REMOTE_PATH} --stop"],
+            ["adb", "-s", adb_device, "shell", f"pkill -f {self._SENTEST_REMOTE_PATH}"],
+        ]
+        for stop_cmd in stop_commands:
+            subprocess.run(stop_cmd, check=False, capture_output=True, text=True)
 
     def _build_stream_commands(self, *, adb_device: str, sensor_idx: int, sensor_mode: int) -> list[list[str]]:
         return [
