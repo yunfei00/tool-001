@@ -1,0 +1,4 @@
+- Goal（目标）
+- Scope（改动范围）
+- Constraints（约束：不得改哪些）
+- Acceptance（验收：运行命令、UI 要出现什么）
