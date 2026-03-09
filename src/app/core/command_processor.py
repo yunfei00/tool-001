@@ -414,17 +414,17 @@ class CommandProcessor:
         targets = self._build_targets(config)
         header = ["round", "sensor idx", "sensor mode", *steps, "final_result"]
         count = 0
-        total = max(len(targets), 1)
+        per_round_total = max(len(targets), 1)
         for values in candidates:
-            total *= len(values)
+            per_round_total *= len(values)
         loop_count = max(config.auto_loop_count, 1)
-        total *= loop_count
 
         with csv_path.open("w", newline="", encoding="utf-8") as handle:
             writer = csv.writer(handle)
             writer.writerow(header)
             index = 0
             for round_index in range(1, loop_count + 1):
+                round_case_index = 0
                 for sensor_idx, sensor_mode in targets:
                     run_config = self._config_with_target(config, sensor_idx=sensor_idx, sensor_mode=sensor_mode)
                     self._start_stream_for_config(run_config)
@@ -438,11 +438,15 @@ class CommandProcessor:
                             applied_values = {}
                             detail_log.write("检测到流未运行，已重新起流并将重新发送全部步骤命令。\n")
                         index += 1
-                        self._emit_progress(progress_callback, f"次数-{round_index}/{loop_count} 本次进度-{index}/{total}")
+                        round_case_index += 1
+                        self._emit_progress(
+                            progress_callback,
+                            f"次数-{round_index}/{loop_count} 本次进度-{round_case_index}/{per_round_total}",
+                        )
                         progress_detail = ", ".join(f"{step}={value}" for step, value in zip(steps, values))
                         detail_log.write(
-                            f"[多参数] round={round_index}/{loop_count} index={index}/{total} "
-                            f"sensor idx={sensor_idx}, sensor mode={sensor_mode}, {progress_detail}\n"
+                            f"[多参数] round={round_index}/{loop_count} index={round_case_index}/{per_round_total} "
+                            f"global_index={index} sensor idx={sensor_idx}, sensor mode={sensor_mode}, {progress_detail}\n"
                         )
                         final_result = ""
                         for step, value in zip(steps, values):
