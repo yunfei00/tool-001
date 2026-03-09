@@ -55,6 +55,7 @@ class MainWindow(QMainWindow):
 
         self._is_dphy = QCheckBox("DPHY")
         self._auto_is_dphy = QCheckBox("DPHY")
+        self._auto_manual_stream = QCheckBox("手动起流(不自动后台起流)")
 
         self._cdr_delay_start = QSpinBox()
         self._cdr_delay_start.setRange(0, 31)
@@ -224,6 +225,7 @@ class MainWindow(QMainWindow):
         auto_form.addRow("EQ dg1 enable", self._auto_eq_dg1_enable)
         auto_form.addRow("EQ sr1", self._auto_range_row(self._auto_eq_sr1_start, self._auto_eq_sr1_end))
         auto_form.addRow("EQ bw", self._auto_eq_bw)
+        auto_form.addRow("相机起流", self._auto_manual_stream)
         auto_layout.addLayout(auto_form)
         auto_actions_layout = QHBoxLayout()
         auto_actions_layout.addWidget(self._start_test_button)
@@ -332,6 +334,7 @@ class MainWindow(QMainWindow):
             auto_eq_sr1_start=self._auto_eq_sr1_start.value(),
             auto_eq_sr1_end=self._auto_eq_sr1_end.value(),
             auto_eq_bw_values=[int(value) for value in self._auto_eq_bw.selected_texts],
+            auto_manual_stream=self._auto_manual_stream.isChecked(),
         )
 
     def _apply_manual_config(self, config: AppConfig) -> None:
@@ -364,6 +367,7 @@ class MainWindow(QMainWindow):
         self._auto_eq_sr1_start.setValue(config.auto_eq_sr1_start)
         self._auto_eq_sr1_end.setValue(config.auto_eq_sr1_end)
         self._auto_eq_bw.select_many([str(value) for value in (config.auto_eq_bw_values or [0, 1, 2, 3])])
+        self._auto_manual_stream.setChecked(config.auto_manual_stream)
         self._update_mode_dependent_fields()
 
     def _parse_auto_sensor_modes(self) -> list[int]:
@@ -538,6 +542,7 @@ class MainWindow(QMainWindow):
             f"device={config.adb_device}, "
             f"sensor_idx={config.auto_sensor_idx}, "
             f"sensor_mode={config.sensor_mode}, "
+            f"manual_stream={config.auto_manual_stream}, "
             f"cdr={config.auto_cdr_delay_start}-{config.auto_cdr_delay_end}, "
             f"eq_offset={config.auto_eq_offset_start}-{config.auto_eq_offset_end}"
         )

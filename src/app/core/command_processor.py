@@ -214,6 +214,8 @@ class CommandProcessor:
 
     def _ensure_stream_for_config(self, config: AppConfig) -> bool:
         """Ensure stream is running for automation; return True when stream was restarted."""
+        if config.auto_manual_stream:
+            return False
         adb_device = config.adb_device
         if not adb_device:
             raise RuntimeError("No adb device selected.")
@@ -453,6 +455,13 @@ class CommandProcessor:
         return count
 
     def _start_stream_for_config(self, config: AppConfig) -> None:
+        adb_device = config.adb_device
+        if not adb_device:
+            raise RuntimeError("No adb device selected.")
+        if config.auto_manual_stream:
+            if self._is_remote_stream_running(adb_device=adb_device):
+                self._stop_stream(adb_device=adb_device)
+            return
         self._ensure_stream_for_config(config)
 
 
