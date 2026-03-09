@@ -115,7 +115,6 @@ class MainWindow(QMainWindow):
         self._auto_command_input = QLineEdit()
         self._auto_command_input.setPlaceholderText("自动化测试可选输入测试步骤列表(逗号分隔，范围见下方参数)")
 
-        self._manual_range_hint = QLabel("参数范围：CDR delay 0-31(CPHY)/0-254(DPHY), EQ offset -31~31, EQ sr0/sr1 0~15")
         self._auto_range_hint = QLabel("参数范围：CDR delay start/end 0-31(CPHY)/0-254(DPHY), EQ offset -31~31, EQ sr0/sr1 0~15")
 
         self._send_button = QPushButton("Send")
@@ -177,12 +176,20 @@ class MainWindow(QMainWindow):
         manual_form = QFormLayout()
         manual_form.addRow("Sensor idx", self._manual_sensor_idx)
         manual_form.addRow("Sensor mode", self._manual_sensor_mode)
-        manual_form.addRow("CDR delay", self._with_step_send(self._cdr_delay_start, "cdr delay", self._is_dphy))
-        manual_form.addRow("EQ offset", self._with_step_send(self._eq_offset, "eq offset"))
+        manual_form.addRow(
+            "CDR delay",
+            self._with_step_send(
+                self._cdr_delay_start,
+                "cdr delay",
+                self._is_dphy,
+                range_text="范围: 0~31(CPHY)/0~254(DPHY)",
+            ),
+        )
+        manual_form.addRow("EQ offset", self._with_step_send(self._eq_offset, "eq offset", range_text="范围: -31~31"))
         manual_form.addRow("EQ dg0 enable", self._with_step_send(self._eq_dg0_enable, "eq dg0 enable"))
-        manual_form.addRow("EQ sr0", self._with_step_send(self._eq_sr0, "eq sr0"))
+        manual_form.addRow("EQ sr0", self._with_step_send(self._eq_sr0, "eq sr0", range_text="范围: 0~15"))
         manual_form.addRow("EQ dg1 enable", self._with_step_send(self._eq_dg1_enable, "eq dg1 enable"))
-        manual_form.addRow("EQ sr1", self._with_step_send(self._eq_sr1, "eq sr1"))
+        manual_form.addRow("EQ sr1", self._with_step_send(self._eq_sr1, "eq sr1", range_text="范围: 0~15"))
         manual_form.addRow("EQ bw", self._with_step_send(self._eq_bw, "eq bw"))
         manual_group.setLayout(manual_form)
 
@@ -195,7 +202,6 @@ class MainWindow(QMainWindow):
         command_layout = QHBoxLayout()
         command_layout.addWidget(self._command_input)
         command_layout.addWidget(self._send_button)
-        command_layout.addWidget(self._manual_range_hint)
         command_layout.addWidget(self._start_stream_debug_button)
         command_layout.addWidget(self._stop_stream_debug_button)
         command_group.setLayout(command_layout)
@@ -244,7 +250,7 @@ class MainWindow(QMainWindow):
                 range_text="范围: -31~31",
             ),
         )
-        auto_form.addRow("EQ dg0 enable", self._with_auto_range_hint(self._auto_eq_dg0_enable, "范围: 0/1"))
+        auto_form.addRow("EQ dg0 enable", self._with_auto_row(self._auto_eq_dg0_enable))
         auto_form.addRow(
             "EQ sr0",
             self._auto_range_row(
@@ -253,7 +259,7 @@ class MainWindow(QMainWindow):
                 range_text="范围: 0~15",
             ),
         )
-        auto_form.addRow("EQ dg1 enable", self._with_auto_range_hint(self._auto_eq_dg1_enable, "范围: 0/1"))
+        auto_form.addRow("EQ dg1 enable", self._with_auto_row(self._auto_eq_dg1_enable))
         auto_form.addRow(
             "EQ sr1",
             self._auto_range_row(
@@ -262,7 +268,7 @@ class MainWindow(QMainWindow):
                 range_text="范围: 0~15",
             ),
         )
-        auto_form.addRow("EQ bw", self._with_auto_range_hint(self._auto_eq_bw, "范围: 0/1/2/3"))
+        auto_form.addRow("EQ bw", self._with_auto_row(self._auto_eq_bw))
         auto_form.addRow("相机起流", self._auto_manual_stream)
         auto_layout.addLayout(auto_form)
         auto_actions_layout = QHBoxLayout()
@@ -477,7 +483,14 @@ class MainWindow(QMainWindow):
         if self._auto_cdr_delay_end.value() > auto_cdr_max:
             self._auto_cdr_delay_end.setValue(auto_cdr_max)
 
-    def _with_step_send(self, field: QWidget, command: str, extra_widget: QWidget | None = None) -> QWidget:
+    def _with_step_send(
+        self,
+        field: QWidget,
+        command: str,
+        extra_widget: QWidget | None = None,
+        *,
+        range_text: str = "",
+    ) -> QWidget:
         row = QWidget()
         layout = QHBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
@@ -489,6 +502,9 @@ class MainWindow(QMainWindow):
         step_send_button.clicked.connect(lambda: self._send_single_step(command))
         self._step_send_buttons.append(step_send_button)
         layout.addWidget(step_send_button)
+        if range_text:
+            layout.addWidget(QLabel(range_text))
+        layout.addStretch(1)
         row.setLayout(layout)
         return row
 
@@ -517,12 +533,11 @@ class MainWindow(QMainWindow):
         row.setLayout(layout)
         return row
 
-    def _with_auto_range_hint(self, field: QWidget, hint: str) -> QWidget:
+    def _with_auto_row(self, field: QWidget) -> QWidget:
         row = QWidget()
         layout = QHBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(field)
-        layout.addWidget(QLabel(hint))
         layout.addStretch(1)
         row.setLayout(layout)
         return row
