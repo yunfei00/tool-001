@@ -376,6 +376,7 @@ class CommandProcessor:
         targets = self._build_targets(config)
         total = max(len(values), 1) * max(len(targets), 1)
         total_elapsed = 0.0
+        sweep_start = time.perf_counter()
         with output_path.open("w", encoding="utf-8") as handle:
             index = 0
             for sensor_idx, sensor_mode in targets:
@@ -404,10 +405,11 @@ class CommandProcessor:
                     result = self.send(step, run_config, start_stream=False)
                     elapsed = time.perf_counter() - start_ts
                     total_elapsed += elapsed
-                    self._emit_progress(progress_callback, f"步骤完成 step={step} value={value} 用时={elapsed:.3f}s")
                     detail_log.write(f"执行完成 step={step} value={value} 用时={elapsed:.3f}s\n{result}\n\n")
                     applied_value = value
                     handle.write(f"sensor idx={sensor_idx} sensor mode={sensor_mode} {step}={value}\n{result}\n\n")
+        sweep_elapsed = time.perf_counter() - sweep_start
+        self._emit_progress(progress_callback, f"本次压测完成 用时={sweep_elapsed:.3f}s")
         return total_elapsed
 
     def _run_multi_param_sweep(
@@ -434,6 +436,7 @@ class CommandProcessor:
             writer.writerow(header)
             index = 0
             for round_index in range(1, loop_count + 1):
+                round_start = time.perf_counter()
                 round_case_index = 0
                 for sensor_idx, sensor_mode in targets:
                     run_config = self._config_with_target(config, sensor_idx=sensor_idx, sensor_mode=sensor_mode)
@@ -472,15 +475,13 @@ class CommandProcessor:
                             final_result = self.send(step, run_config, start_stream=False)
                             elapsed = time.perf_counter() - start_ts
                             total_elapsed += elapsed
-                            self._emit_progress(
-                                progress_callback,
-                                f"步骤完成 step={step} value={value} 用时={elapsed:.3f}s",
-                            )
                             detail_log.write(f"子步骤完成 step={step} value={value} 用时={elapsed:.3f}s\n{final_result}\n")
                             applied_values[step] = value
                         detail_log.write("\n")
                         writer.writerow([round_index, sensor_idx, sensor_mode, *values, self._result_symbol(final_result)])
                         count += 1
+                round_elapsed = time.perf_counter() - round_start
+                self._emit_progress(progress_callback, f"次数-{round_index}/{loop_count} 压测完成 用时={round_elapsed:.3f}s")
         return count, total_elapsed
 
     @staticmethod
