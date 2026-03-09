@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import csv
 import re
+from datetime import datetime
 
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
@@ -117,8 +118,6 @@ class MainWindow(QMainWindow):
 
         self._command_input = QLineEdit()
         self._command_input.setPlaceholderText("手动模式可输入寄存器命令（范围见下方参数）")
-        self._auto_command_input = QLineEdit()
-        self._auto_command_input.setPlaceholderText("自动化测试可选输入测试步骤列表(逗号分隔)")
         self._result_file_input = QLineEdit()
         self._result_file_input.setReadOnly(True)
         self._open_result_dir_button = QPushButton("打开文件夹")
@@ -165,6 +164,7 @@ class MainWindow(QMainWindow):
         self._bind_events()
         self.load_manual_config()
         self.load_auto_config()
+        self._set_current_result_file(self._discover_latest_result_file())
 
     def _build_ui(self) -> None:
         adb_group = QGroupBox("ADB Device")
@@ -304,11 +304,6 @@ class MainWindow(QMainWindow):
         config_actions_layout.addWidget(self._auto_save_button)
         config_actions_layout.addStretch(1)
 
-        command_group = QGroupBox("Command Debug")
-        command_layout = QHBoxLayout()
-        command_layout.addWidget(self._auto_command_input)
-        command_group.setLayout(command_layout)
-
         result_group = QGroupBox("运行结果")
         result_layout = QHBoxLayout()
         result_layout.addWidget(self._result_file_input)
@@ -328,7 +323,6 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout()
         layout.addWidget(auto_group)
         layout.addLayout(config_actions_layout)
-        layout.addWidget(command_group)
         layout.addWidget(result_group)
         layout.addWidget(log_group, stretch=1)
         tab.setLayout(layout)
@@ -612,10 +606,16 @@ class MainWindow(QMainWindow):
         self._append_manual_log(response)
 
     def _append_manual_log(self, message: str) -> None:
-        self._log_output.append(message)
+        self._append_log_with_timestamp(self._log_output, message)
 
     def _append_auto_log(self, message: str) -> None:
-        self._auto_log_output.append(message)
+        self._append_log_with_timestamp(self._auto_log_output, message)
+
+    @staticmethod
+    def _append_log_with_timestamp(output: QTextEdit, message: str) -> None:
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+        lines = message.splitlines() or [message]
+        output.append("\n".join(f"[{timestamp}] {line}" for line in lines))
 
     def clear_manual_logs(self) -> None:
         self._log_output.clear()
@@ -687,14 +687,12 @@ class MainWindow(QMainWindow):
             self._append_auto_log("自动化测试参数范围错误:\n" + "\n".join(range_errors))
             return
 
-        command = self._auto_command_input.text().strip()
-
         self._start_test_button.setEnabled(False)
         self._stop_test_button.setEnabled(True)
         self._append_auto_log("自动化测试已启动。")
 
         self._auto_test_thread = QThread(self)
-        self._auto_test_worker = _AutoTestWorker(self._command_processor, config, command)
+        self._auto_test_worker = _AutoTestWorker(self._command_processor, config)
         self._auto_test_worker.moveToThread(self._auto_test_thread)
 
         self._auto_test_thread.started.connect(self._auto_test_worker.run)
@@ -716,7 +714,6 @@ class MainWindow(QMainWindow):
     def _on_auto_test_finished(self, response: str) -> None:
         self._append_auto_log(response)
         self._set_current_result_file(self._extract_result_file_path(response))
-        self._auto_command_input.clear()
 
     def _on_auto_test_failed(self, error: str) -> None:
         self._append_auto_log(f"自动化测试执行失败: {error}")
@@ -763,6 +760,8 @@ class MainWindow(QMainWindow):
         self._load_result_file_into_analysis()
 
     def _load_result_file_into_analysis(self) -> None:
+        if self._current_result_file_path is None:
+            self._set_current_result_file(self._discover_latest_result_file())
         path = self._current_result_file_path
         if path is None or not path.exists():
             self._analysis_rows = []
@@ -776,6 +775,20 @@ class MainWindow(QMainWindow):
         else:
             self._analysis_rows = self._read_text_rows(path)
         self._apply_analysis_filter()
+
+    @staticmethod
+    def _discover_latest_result_file() -> Path | None:
+        output_dir = Path("configs") / "auto_test_outputs"
+        if not output_dir.exists():
+            return None
+        candidates = [
+            item
+            for item in output_dir.iterdir()
+            if item.is_file() and item.suffix.lower() in {".csv", ".txt", ".log"}
+        ]
+        if not candidates:
+            return None
+        return max(candidates, key=lambda item: item.stat().st_mtime)
 
     @staticmethod
     def _read_csv_rows(path: Path) -> list[dict[str, str]]:
@@ -855,11 +868,10 @@ class _AutoTestWorker(QObject):
     failed = Signal(str)
     progress = Signal(str)
 
-    def __init__(self, command_processor: CommandProcessor, config: AppConfig, command: str) -> None:
+    def __init__(self, command_processor: CommandProcessor, config: AppConfig) -> None:
         super().__init__()
         self._command_processor = command_processor
         self._config = config
-        self._command = command
         self._stop_requested = False
 
     def request_stop(self) -> None:
@@ -873,7 +885,6 @@ class _AutoTestWorker(QObject):
         try:
             response = self._command_processor.run_automated_test(
                 self._config,
-                self._command,
                 progress_callback=self.progress.emit,
                 should_stop_callback=self._should_stop,
             )
