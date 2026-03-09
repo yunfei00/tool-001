@@ -8,6 +8,7 @@ import time
 import shlex
 import csv
 import subprocess
+from typing import TextIO
 
 from app.core.config_manager import AppConfig
 from app.core.eye_scan_module import EyeScanCommand, EyeScanModule
@@ -276,33 +277,51 @@ class CommandProcessor:
     ) -> str:
         display_steps = self._parse_auto_steps(step_text)
         steps = self._execution_steps(display_steps)
-        estimated_cases = self.estimate_auto_cases(config, step_text)
-        self._emit_progress(
-            progress_callback,
-            (
-                "自动化任务已创建："
-                f"steps={', '.join(display_steps)}；"
-                f"预计组合数={estimated_cases}。"
-            ),
-        )
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_dir = Path("configs") / "auto_test_outputs"
         output_dir.mkdir(parents=True, exist_ok=True)
+        detail_log_path = output_dir / f"auto_detail_{timestamp}.log"
 
-        if set(steps) == {"cdr delay", "eq offset"} and len(steps) == 2:
-            cdr_path = output_dir / f"cdr_delay_{timestamp}.txt"
-            eq_path = output_dir / f"eq_offset_{timestamp}.txt"
-            self._run_single_param_sweep("cdr delay", config, cdr_path, progress_callback, should_stop_callback)
-            self._run_single_param_sweep("eq offset", config, eq_path, progress_callback, should_stop_callback)
-            return (
-                "自动化测试完成。\n"
-                f"cdr delay 输出文件: {cdr_path}\n"
-                f"eq offset 输出文件: {eq_path}"
+        with detail_log_path.open("w", encoding="utf-8") as detail_log:
+            detail_log.write(f"steps={', '.join(display_steps)}\n")
+            detail_log.write(f"loops={max(config.auto_loop_count, 1)}\n\n")
+
+            if set(steps) == {"cdr delay", "eq offset"} and len(steps) == 2:
+                cdr_path = output_dir / f"cdr_delay_{timestamp}.txt"
+                eq_path = output_dir / f"eq_offset_{timestamp}.txt"
+                self._run_single_param_sweep(
+                    "cdr delay",
+                    config,
+                    cdr_path,
+                    progress_callback,
+                    should_stop_callback,
+                    detail_log,
+                )
+                self._run_single_param_sweep(
+                    "eq offset",
+                    config,
+                    eq_path,
+                    progress_callback,
+                    should_stop_callback,
+                    detail_log,
+                )
+                return (
+                    "自动化测试完成。\n"
+                    f"cdr delay 输出文件: {cdr_path}\n"
+                    f"eq offset 输出文件: {eq_path}\n"
+                    f"详细日志: {detail_log_path}"
+                )
+
+            csv_path = output_dir / f"multi_param_{timestamp}.csv"
+            row_count = self._run_multi_param_sweep(
+                steps,
+                config,
+                csv_path,
+                progress_callback,
+                should_stop_callback,
+                detail_log,
             )
-
-        csv_path = output_dir / f"multi_param_{timestamp}.csv"
-        row_count = self._run_multi_param_sweep(steps, config, csv_path, progress_callback, should_stop_callback)
-        return f"自动化测试完成。共 {row_count} 行，CSV 输出: {csv_path}"
+        return f"自动化测试完成。共 {row_count} 行，CSV 输出: {csv_path}，详细日志: {detail_log_path}"
 
     def estimate_auto_cases(self, config: AppConfig, step_text: str = "") -> int:
         steps = self._execution_steps(self._parse_auto_steps(step_text))
@@ -346,6 +365,7 @@ class CommandProcessor:
         output_path: Path,
         progress_callback: Callable[[str], None] | None,
         should_stop_callback: Callable[[], bool] | None,
+        detail_log: TextIO,
     ) -> None:
         values = self._step_candidates(step, config)
         targets = self._build_targets(config)
@@ -359,33 +379,25 @@ class CommandProcessor:
                 for value in values:
                     if self._should_stop(should_stop_callback):
                         self._emit_progress(progress_callback, "收到停止请求，终止当前自动化任务。")
+                        detail_log.write("收到停止请求，终止当前自动化任务。\n")
                         return
                     if self._ensure_stream_for_config(run_config):
                         applied_value = None
-                        self._emit_progress(progress_callback, "检测到流未运行，已重新起流并将重新发送命令。")
+                        detail_log.write("检测到流未运行，已重新起流并将重新发送命令。\n")
                     index += 1
-                    self._emit_progress(
-                        progress_callback,
-                        f"[{index}/{total}] 执行 sensor idx={sensor_idx}, sensor mode={sensor_mode}, {step}={value}",
+                    self._emit_progress(progress_callback, f"本次进度-{index}/{total}")
+                    detail_log.write(
+                        f"[单参数] index={index}/{total} sensor idx={sensor_idx}, "
+                        f"sensor mode={sensor_mode}, {step}={value}\n"
                     )
                     if applied_value == value:
-                        self._emit_progress(
-                            progress_callback,
-                            f"[{index}/{total}] 跳过未变化参数 step={step} value={value}",
-                        )
+                        detail_log.write(f"跳过未变化参数 step={step} value={value}\n")
                         continue
                     run_config = self._config_with_step_value(run_config, step, value)
-                    self._emit_progress(
-                        progress_callback,
-                        f"[{index}/{total}] 准备执行命令 step={step} value={value}",
-                    )
                     start_ts = time.perf_counter()
                     result = self.send(step, run_config, start_stream=False)
                     elapsed = time.perf_counter() - start_ts
-                    self._emit_progress(
-                        progress_callback,
-                        f"[{index}/{total}] 完成 step={step} value={value} 用时={elapsed:.2f}s",
-                    )
+                    detail_log.write(f"执行完成 step={step} value={value} 用时={elapsed:.2f}s\n{result}\n\n")
                     applied_value = value
                     handle.write(f"sensor idx={sensor_idx} sensor mode={sensor_mode} {step}={value}\n{result}\n\n")
 
@@ -396,6 +408,7 @@ class CommandProcessor:
         csv_path: Path,
         progress_callback: Callable[[str], None] | None,
         should_stop_callback: Callable[[], bool] | None,
+        detail_log: TextIO,
     ) -> int:
         candidates = [self._step_candidates(step, config) for step in steps]
         targets = self._build_targets(config)
@@ -419,40 +432,34 @@ class CommandProcessor:
                     for values in product(*candidates):
                         if self._should_stop(should_stop_callback):
                             self._emit_progress(progress_callback, "收到停止请求，终止当前自动化任务。")
+                            detail_log.write("收到停止请求，终止当前自动化任务。\n")
                             return count
                         if self._ensure_stream_for_config(run_config):
                             applied_values = {}
-                            self._emit_progress(progress_callback, "检测到流未运行，已重新起流并将重新发送全部步骤命令。")
+                            detail_log.write("检测到流未运行，已重新起流并将重新发送全部步骤命令。\n")
                         index += 1
+                        self._emit_progress(progress_callback, f"次数-{round_index}/{loop_count} 本次进度-{index}/{total}")
                         progress_detail = ", ".join(f"{step}={value}" for step, value in zip(steps, values))
-                        self._emit_progress(
-                            progress_callback,
-                            f"[{index}/{total}] 执行 round={round_index} sensor idx={sensor_idx}, sensor mode={sensor_mode}, {progress_detail}",
+                        detail_log.write(
+                            f"[多参数] round={round_index}/{loop_count} index={index}/{total} "
+                            f"sensor idx={sensor_idx}, sensor mode={sensor_mode}, {progress_detail}\n"
                         )
                         final_result = ""
                         for step, value in zip(steps, values):
                             if self._should_stop(should_stop_callback):
                                 self._emit_progress(progress_callback, "收到停止请求，终止当前自动化任务。")
+                                detail_log.write("收到停止请求，终止当前自动化任务。\n")
                                 return count
                             if applied_values.get(step) == value:
-                                self._emit_progress(
-                                    progress_callback,
-                                    f"[{index}/{total}] 跳过未变化参数 step={step} value={value}",
-                                )
+                                detail_log.write(f"跳过未变化参数 step={step} value={value}\n")
                                 continue
                             run_config = self._config_with_step_value(run_config, step, value)
-                            self._emit_progress(
-                                progress_callback,
-                                f"[{index}/{total}] 开始执行子步骤 step={step} value={value}",
-                            )
                             start_ts = time.perf_counter()
                             final_result = self.send(step, run_config, start_stream=False)
                             elapsed = time.perf_counter() - start_ts
-                            self._emit_progress(
-                                progress_callback,
-                                f"[{index}/{total}] 子步骤完成 step={step} value={value} 用时={elapsed:.2f}s",
-                            )
+                            detail_log.write(f"子步骤完成 step={step} value={value} 用时={elapsed:.2f}s\n{final_result}\n")
                             applied_values[step] = value
+                        detail_log.write("\n")
                         writer.writerow([round_index, sensor_idx, sensor_mode, *values, self._result_symbol(final_result)])
                         count += 1
         return count
