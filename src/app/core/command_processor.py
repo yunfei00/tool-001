@@ -42,6 +42,9 @@ class CommandProcessor:
     _ADB_SHORT_TIMEOUT_SECONDS = 10
     _ADB_STOP_TIMEOUT_SECONDS = 5
 
+    def __init__(self) -> None:
+        self._stream_processes: dict[tuple[str, int, int], subprocess.Popen[str]] = {}
+
     def send(self, command: str, config: AppConfig, *, start_stream: bool = False) -> str:
         timestamp = datetime.now().strftime("%H:%M:%S")
         adb_device = config.adb_device
@@ -150,33 +153,31 @@ class CommandProcessor:
             timeout=self._ADB_SHORT_TIMEOUT_SECONDS,
         )
 
-        errors: list[str] = []
-        for stream_cmd in self._build_stream_commands(
+        target = (adb_device, sensor_idx, sensor_mode)
+        existing = self._stream_processes.get(target)
+        if existing and existing.poll() is None:
+            return
+
+        stream_cmd = self._build_stream_command(
             adb_device=adb_device,
             sensor_idx=sensor_idx,
             sensor_mode=sensor_mode,
-        ):
-            try:
-                result = subprocess.run(
-                    stream_cmd,
-                    check=False,
-                    capture_output=True,
-                    text=True,
-                    timeout=self._ADB_SHORT_TIMEOUT_SECONDS,
-                )
-            except subprocess.TimeoutExpired:
-                # Some sentest variants keep running in foreground after startup.
-                # A timeout here generally means stream has started and command did not return.
-                return
-            if result.returncode == 0:
-                return
-            output = ((result.stdout or "") + (result.stderr or "")).strip()
-            errors.append(f"{' '.join(stream_cmd)} -> {output}")
-
-        raise RuntimeError(
-            "Start stream failed: sentest_v4l2 command returned non-zero. "
-            + " | ".join(errors)
         )
+        process = subprocess.Popen(
+            stream_cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        time.sleep(0.5)
+        if process.poll() is not None:
+            output, _ = process.communicate(timeout=1)
+            raise RuntimeError(
+                "Start stream failed: sentest_v4l2 process exited unexpectedly. "
+                f"cmd={' '.join(stream_cmd)} output={(output or '').strip()}"
+            )
+        self._stream_processes[target] = process
 
     def _remote_tool_exists(self, *, adb_device: str) -> bool:
         check_cmd = [
@@ -190,57 +191,45 @@ class CommandProcessor:
         return result.returncode == 0 and "__EXISTS__" in (result.stdout or "")
 
     def _stop_stream(self, *, adb_device: str) -> None:
-        stop_commands = [
-            ["adb", "-s", adb_device, "shell", f"{self._SENTEST_REMOTE_PATH} --stop-stream"],
-            ["adb", "-s", adb_device, "shell", f"{self._SENTEST_REMOTE_PATH} --stop"],
-            ["adb", "-s", adb_device, "shell", f"pkill -f {self._SENTEST_REMOTE_PATH}"],
-        ]
-        for stop_cmd in stop_commands:
-            try:
-                subprocess.run(
-                    stop_cmd,
-                    check=False,
-                    capture_output=True,
-                    text=True,
-                    timeout=self._ADB_STOP_TIMEOUT_SECONDS,
-                )
-            except subprocess.TimeoutExpired:
+        stopped_any = False
+        for target, process in list(self._stream_processes.items()):
+            target_device, _, _ = target
+            if target_device != adb_device:
                 continue
+            if process.poll() is not None:
+                self._stream_processes.pop(target, None)
+                continue
+            try:
+                if process.stdin is not None:
+                    process.stdin.write("\n")
+                    process.stdin.flush()
+                process.wait(timeout=self._ADB_STOP_TIMEOUT_SECONDS)
+                stopped_any = True
+            except Exception:  # noqa: BLE001
+                process.terminate()
+                process.wait(timeout=self._ADB_STOP_TIMEOUT_SECONDS)
+            finally:
+                self._stream_processes.pop(target, None)
 
-    def _build_stream_commands(self, *, adb_device: str, sensor_idx: int, sensor_mode: int) -> list[list[str]]:
+        if stopped_any:
+            return
+
+        # Fallback for stale stream processes started outside current instance.
+        subprocess.run(
+            ["adb", "-s", adb_device, "shell", f"pkill -f {self._SENTEST_REMOTE_PATH}"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=self._ADB_STOP_TIMEOUT_SECONDS,
+        )
+
+    def _build_stream_command(self, *, adb_device: str, sensor_idx: int, sensor_mode: int) -> list[str]:
         return [
-            [
-                "adb",
-                "-s",
-                adb_device,
-                "shell",
-                (
-                    f"nohup {self._SENTEST_REMOTE_PATH} "
-                    f"--sensor-idx {sensor_idx} --sensor-mode {sensor_mode} --start-stream "
-                    ">/dev/null 2>&1 &"
-                ),
-            ],
-            [
-                "adb",
-                "-s",
-                adb_device,
-                "shell",
-                f"{self._SENTEST_REMOTE_PATH} --sensor-idx {sensor_idx} --sensor-mode {sensor_mode} --start-stream",
-            ],
-            [
-                "adb",
-                "-s",
-                adb_device,
-                "shell",
-                f"{self._SENTEST_REMOTE_PATH} {sensor_idx} {sensor_mode}",
-            ],
-            [
-                "adb",
-                "-s",
-                adb_device,
-                "shell",
-                f"{self._SENTEST_REMOTE_PATH}",
-            ],
+            "adb",
+            "-s",
+            adb_device,
+            "shell",
+            f"{self._SENTEST_REMOTE_PATH} {sensor_idx} {sensor_mode}",
         ]
 
     def run_automated_test(
