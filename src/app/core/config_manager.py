@@ -38,6 +38,7 @@ class AppConfig:
     auto_eq_bw_end: int = 3
     auto_eq_bw_values: list[int] | None = None
     auto_manual_stream: bool = False
+    auto_loop_count: int = 1
 
 
 class ConfigManager:
@@ -121,6 +122,7 @@ class ConfigManager:
                 raw_data.get("auto_eq_bw_values"), allowed={0, 1, 2, 3}
             ),
             auto_manual_stream=self._normalize_is_dphy(raw_data.get("auto_manual_stream")),
+            auto_loop_count=self._normalize_integer(raw_data.get("auto_loop_count"), minimum=1, maximum=9999, default=1),
         )
 
     def save(self, config: AppConfig) -> None:
