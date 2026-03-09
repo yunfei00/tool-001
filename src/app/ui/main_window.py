@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QTextEdit,
     QVBoxLayout,
     QWidget,
+    QFileDialog,
 )
 from PySide6.QtCore import QObject, QThread, Signal, QUrl
 
@@ -146,6 +147,7 @@ class MainWindow(QMainWindow):
 
         self._analysis_result_path = QLineEdit()
         self._analysis_result_path.setReadOnly(True)
+        self._analysis_browse_button = QPushButton("浏览")
         self._analysis_reload_button = QPushButton("刷新")
         self._analysis_status_filter = QComboBox()
         self._analysis_status_filter.addItems(["仅成功", "全部", "失败", "待定"])
@@ -334,6 +336,7 @@ class MainWindow(QMainWindow):
         source_group = QGroupBox("当前结果文件")
         source_layout = QHBoxLayout()
         source_layout.addWidget(self._analysis_result_path)
+        source_layout.addWidget(self._analysis_browse_button)
         source_layout.addWidget(self._analysis_reload_button)
         source_group.setLayout(source_layout)
 
@@ -377,6 +380,7 @@ class MainWindow(QMainWindow):
         self._stop_test_button.clicked.connect(self._stop_auto_test)
         self._open_result_dir_button.clicked.connect(self._open_result_directory)
         self._view_result_button.clicked.connect(self._jump_to_analysis_tab)
+        self._analysis_browse_button.clicked.connect(self._browse_analysis_file)
         self._analysis_reload_button.clicked.connect(self._load_result_file_into_analysis)
         self._analysis_status_filter.currentIndexChanged.connect(self._apply_analysis_filter)
         self._analysis_keyword_filter.textChanged.connect(self._apply_analysis_filter)
@@ -757,6 +761,18 @@ class MainWindow(QMainWindow):
 
     def _jump_to_analysis_tab(self) -> None:
         self._mode_tabs.setCurrentIndex(2)
+        self._load_result_file_into_analysis()
+
+    def _browse_analysis_file(self) -> None:
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "选择结果文件",
+            str((Path("configs") / "auto_test_outputs").resolve()),
+            "Result Files (*.csv *.log *.txt);;CSV Files (*.csv);;All Files (*)",
+        )
+        if not file_path:
+            return
+        self._set_current_result_file(Path(file_path))
         self._load_result_file_into_analysis()
 
     def _load_result_file_into_analysis(self) -> None:
