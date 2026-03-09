@@ -311,7 +311,7 @@ class CommandProcessor:
         total = 1
         for values in candidates:
             total *= len(values)
-        return total * target_count
+        return total * target_count * max(config.auto_loop_count, 1)
 
     def _parse_auto_steps(self, step_text: str) -> list[str]:
         if not step_text.strip():
@@ -399,60 +399,72 @@ class CommandProcessor:
     ) -> int:
         candidates = [self._step_candidates(step, config) for step in steps]
         targets = self._build_targets(config)
-        header = ["sensor idx", "sensor mode", *steps, "final_result"]
+        header = ["round", "sensor idx", "sensor mode", *steps, "final_result"]
         count = 0
         total = max(len(targets), 1)
         for values in candidates:
             total *= len(values)
+        loop_count = max(config.auto_loop_count, 1)
+        total *= loop_count
 
         with csv_path.open("w", newline="", encoding="utf-8") as handle:
             writer = csv.writer(handle)
             writer.writerow(header)
             index = 0
-            for sensor_idx, sensor_mode in targets:
-                run_config = self._config_with_target(config, sensor_idx=sensor_idx, sensor_mode=sensor_mode)
-                self._start_stream_for_config(run_config)
-                applied_values: dict[str, int] = {}
-                for values in product(*candidates):
-                    if self._should_stop(should_stop_callback):
-                        self._emit_progress(progress_callback, "收到停止请求，终止当前自动化任务。")
-                        return count
-                    if self._ensure_stream_for_config(run_config):
-                        applied_values = {}
-                        self._emit_progress(progress_callback, "检测到流未运行，已重新起流并将重新发送全部步骤命令。")
-                    index += 1
-                    progress_detail = ", ".join(f"{step}={value}" for step, value in zip(steps, values))
-                    self._emit_progress(
-                        progress_callback,
-                        f"[{index}/{total}] 执行 sensor idx={sensor_idx}, sensor mode={sensor_mode}, {progress_detail}",
-                    )
-                    final_result = ""
-                    for step, value in zip(steps, values):
+            for round_index in range(1, loop_count + 1):
+                for sensor_idx, sensor_mode in targets:
+                    run_config = self._config_with_target(config, sensor_idx=sensor_idx, sensor_mode=sensor_mode)
+                    self._start_stream_for_config(run_config)
+                    applied_values: dict[str, int] = {}
+                    for values in product(*candidates):
                         if self._should_stop(should_stop_callback):
                             self._emit_progress(progress_callback, "收到停止请求，终止当前自动化任务。")
                             return count
-                        if applied_values.get(step) == value:
+                        if self._ensure_stream_for_config(run_config):
+                            applied_values = {}
+                            self._emit_progress(progress_callback, "检测到流未运行，已重新起流并将重新发送全部步骤命令。")
+                        index += 1
+                        progress_detail = ", ".join(f"{step}={value}" for step, value in zip(steps, values))
+                        self._emit_progress(
+                            progress_callback,
+                            f"[{index}/{total}] 执行 round={round_index} sensor idx={sensor_idx}, sensor mode={sensor_mode}, {progress_detail}",
+                        )
+                        final_result = ""
+                        for step, value in zip(steps, values):
+                            if self._should_stop(should_stop_callback):
+                                self._emit_progress(progress_callback, "收到停止请求，终止当前自动化任务。")
+                                return count
+                            if applied_values.get(step) == value:
+                                self._emit_progress(
+                                    progress_callback,
+                                    f"[{index}/{total}] 跳过未变化参数 step={step} value={value}",
+                                )
+                                continue
+                            run_config = self._config_with_step_value(run_config, step, value)
                             self._emit_progress(
                                 progress_callback,
-                                f"[{index}/{total}] 跳过未变化参数 step={step} value={value}",
+                                f"[{index}/{total}] 开始执行子步骤 step={step} value={value}",
                             )
-                            continue
-                        run_config = self._config_with_step_value(run_config, step, value)
-                        self._emit_progress(
-                            progress_callback,
-                            f"[{index}/{total}] 开始执行子步骤 step={step} value={value}",
-                        )
-                        start_ts = time.perf_counter()
-                        final_result = self.send(step, run_config, start_stream=False)
-                        elapsed = time.perf_counter() - start_ts
-                        self._emit_progress(
-                            progress_callback,
-                            f"[{index}/{total}] 子步骤完成 step={step} value={value} 用时={elapsed:.2f}s",
-                        )
-                        applied_values[step] = value
-                    writer.writerow([sensor_idx, sensor_mode, *values, final_result])
-                    count += 1
+                            start_ts = time.perf_counter()
+                            final_result = self.send(step, run_config, start_stream=False)
+                            elapsed = time.perf_counter() - start_ts
+                            self._emit_progress(
+                                progress_callback,
+                                f"[{index}/{total}] 子步骤完成 step={step} value={value} 用时={elapsed:.2f}s",
+                            )
+                            applied_values[step] = value
+                        writer.writerow([round_index, sensor_idx, sensor_mode, *values, self._result_symbol(final_result)])
+                        count += 1
         return count
+
+    @staticmethod
+    def _result_symbol(result_text: str) -> str:
+        upper = result_text.upper()
+        if "SUCCESS" in upper:
+            return "O"
+        if "FAIL" in upper:
+            return "X"
+        return "P"
 
     def _start_stream_for_config(self, config: AppConfig) -> None:
         adb_device = config.adb_device
@@ -566,6 +578,7 @@ class CommandProcessor:
             auto_eq_sr1_start=config.auto_eq_sr1_start,
             auto_eq_sr1_end=config.auto_eq_sr1_end,
             auto_eq_bw_values=config.auto_eq_bw_values,
+            auto_loop_count=config.auto_loop_count,
         )
 
     def _build_targets(self, config: AppConfig) -> list[tuple[int, int]]:

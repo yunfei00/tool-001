@@ -57,6 +57,10 @@ class MainWindow(QMainWindow):
         self._auto_is_dphy = QCheckBox("DPHY")
         self._auto_manual_stream = QCheckBox("手动起流(不自动后台起流)")
 
+        self._auto_loop_count = QSpinBox()
+        self._auto_loop_count.setRange(1, 9999)
+        self._auto_loop_count.setValue(1)
+
         self._cdr_delay_start = QSpinBox()
         self._cdr_delay_start.setRange(0, 31)
 
@@ -107,9 +111,12 @@ class MainWindow(QMainWindow):
         self._auto_eq_bw = _MultiSelectCheckGroup(["0", "1", "2", "3"], default=["0", "1", "2", "3"])
 
         self._command_input = QLineEdit()
-        self._command_input.setPlaceholderText("手动模式可输入寄存器命令")
+        self._command_input.setPlaceholderText("手动模式可输入寄存器命令（范围见下方参数）")
         self._auto_command_input = QLineEdit()
-        self._auto_command_input.setPlaceholderText("自动化测试可选输入测试步骤列表(逗号分隔)")
+        self._auto_command_input.setPlaceholderText("自动化测试可选输入测试步骤列表(逗号分隔，范围见下方参数)")
+
+        self._manual_range_hint = QLabel("参数范围：CDR delay 0-31(CPHY)/0-254(DPHY), EQ offset -31~31, EQ sr0/sr1 0~15")
+        self._auto_range_hint = QLabel("参数范围：CDR delay start/end 0-31(CPHY)/0-254(DPHY), EQ offset -31~31, EQ sr0/sr1 0~15")
 
         self._send_button = QPushButton("Send")
         self._load_button = QPushButton("Load Config")
@@ -188,6 +195,7 @@ class MainWindow(QMainWindow):
         command_layout = QHBoxLayout()
         command_layout.addWidget(self._command_input)
         command_layout.addWidget(self._send_button)
+        command_layout.addWidget(self._manual_range_hint)
         command_layout.addWidget(self._start_stream_debug_button)
         command_layout.addWidget(self._stop_stream_debug_button)
         command_group.setLayout(command_layout)
@@ -226,6 +234,7 @@ class MainWindow(QMainWindow):
         auto_form.addRow("EQ sr1", self._auto_range_row(self._auto_eq_sr1_start, self._auto_eq_sr1_end))
         auto_form.addRow("EQ bw", self._auto_eq_bw)
         auto_form.addRow("相机起流", self._auto_manual_stream)
+        auto_form.addRow("压测次数", self._auto_loop_count)
         auto_layout.addLayout(auto_form)
         auto_actions_layout = QHBoxLayout()
         auto_actions_layout.addWidget(self._start_test_button)
@@ -242,6 +251,7 @@ class MainWindow(QMainWindow):
         command_group = QGroupBox("Command Debug")
         command_layout = QHBoxLayout()
         command_layout.addWidget(self._auto_command_input)
+        command_layout.addWidget(self._auto_range_hint)
         command_group.setLayout(command_layout)
 
         log_group = QGroupBox("Log Output")
@@ -306,6 +316,7 @@ class MainWindow(QMainWindow):
             auto_eq_sr1_end=self._auto_eq_sr1_end.value(),
             auto_eq_bw_values=[int(value) for value in self._auto_eq_bw.selected_texts],
             auto_sensor_idx=[int(value) for value in self._auto_sensor_idx.selected_texts],
+            auto_loop_count=self._auto_loop_count.value(),
         )
 
     def _collect_auto_config(self) -> AppConfig:
@@ -335,6 +346,7 @@ class MainWindow(QMainWindow):
             auto_eq_sr1_end=self._auto_eq_sr1_end.value(),
             auto_eq_bw_values=[int(value) for value in self._auto_eq_bw.selected_texts],
             auto_manual_stream=self._auto_manual_stream.isChecked(),
+            auto_loop_count=self._auto_loop_count.value(),
         )
 
     def _apply_manual_config(self, config: AppConfig) -> None:
@@ -368,6 +380,7 @@ class MainWindow(QMainWindow):
         self._auto_eq_sr1_end.setValue(config.auto_eq_sr1_end)
         self._auto_eq_bw.select_many([str(value) for value in (config.auto_eq_bw_values or [0, 1, 2, 3])])
         self._auto_manual_stream.setChecked(config.auto_manual_stream)
+        self._auto_loop_count.setValue(config.auto_loop_count)
         self._update_mode_dependent_fields()
 
     def _parse_auto_sensor_modes(self) -> list[int]:
@@ -412,6 +425,16 @@ class MainWindow(QMainWindow):
         self._refresh_adb_devices(should_log=True)
 
     def _update_mode_dependent_fields(self) -> None:
+        source = self.sender()
+        if source is self._is_dphy and self._auto_is_dphy.isChecked() != self._is_dphy.isChecked():
+            self._auto_is_dphy.blockSignals(True)
+            self._auto_is_dphy.setChecked(self._is_dphy.isChecked())
+            self._auto_is_dphy.blockSignals(False)
+        elif source is self._auto_is_dphy and self._is_dphy.isChecked() != self._auto_is_dphy.isChecked():
+            self._is_dphy.blockSignals(True)
+            self._is_dphy.setChecked(self._auto_is_dphy.isChecked())
+            self._is_dphy.blockSignals(False)
+
         manual_cdr_max = 254 if self._is_dphy.isChecked() else 31
         self._cdr_delay_start.setMaximum(manual_cdr_max)
         if self._cdr_delay_start.value() > manual_cdr_max:
@@ -543,6 +566,7 @@ class MainWindow(QMainWindow):
             f"sensor_idx={config.auto_sensor_idx}, "
             f"sensor_mode={config.sensor_mode}, "
             f"manual_stream={config.auto_manual_stream}, "
+            f"loops={config.auto_loop_count}, "
             f"cdr={config.auto_cdr_delay_start}-{config.auto_cdr_delay_end}, "
             f"eq_offset={config.auto_eq_offset_start}-{config.auto_eq_offset_end}"
         )
