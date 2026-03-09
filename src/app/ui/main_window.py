@@ -113,9 +113,8 @@ class MainWindow(QMainWindow):
         self._command_input = QLineEdit()
         self._command_input.setPlaceholderText("手动模式可输入寄存器命令（范围见下方参数）")
         self._auto_command_input = QLineEdit()
-        self._auto_command_input.setPlaceholderText("自动化测试可选输入测试步骤列表(逗号分隔，范围见下方参数)")
+        self._auto_command_input.setPlaceholderText("自动化测试可选输入测试步骤列表(逗号分隔)")
 
-        self._auto_range_hint = QLabel("参数范围：CDR delay start/end 0-31(CPHY)/0-254(DPHY), EQ offset -31~31, EQ sr0/sr1 0~15")
 
         self._send_button = QPushButton("Send")
         self._load_button = QPushButton("Load Config")
@@ -286,7 +285,6 @@ class MainWindow(QMainWindow):
         command_group = QGroupBox("Command Debug")
         command_layout = QHBoxLayout()
         command_layout.addWidget(self._auto_command_input)
-        command_layout.addWidget(self._auto_range_hint)
         command_group.setLayout(command_layout)
 
         log_group = QGroupBox("Log Output")
