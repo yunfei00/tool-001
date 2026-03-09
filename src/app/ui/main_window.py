@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+import csv
+import re
 
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
@@ -13,13 +16,15 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMainWindow,
     QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
     QSpinBox,
     QTabWidget,
     QTextEdit,
     QVBoxLayout,
     QWidget,
 )
-from PySide6.QtCore import QObject, QThread, Signal
+from PySide6.QtCore import QObject, QThread, Signal, QUrl
 
 from app.core.adb_device_service import AdbDeviceService
 from app.core.command_processor import CommandProcessor
@@ -114,6 +119,10 @@ class MainWindow(QMainWindow):
         self._command_input.setPlaceholderText("手动模式可输入寄存器命令（范围见下方参数）")
         self._auto_command_input = QLineEdit()
         self._auto_command_input.setPlaceholderText("自动化测试可选输入测试步骤列表(逗号分隔)")
+        self._result_file_input = QLineEdit()
+        self._result_file_input.setReadOnly(True)
+        self._open_result_dir_button = QPushButton("打开文件夹")
+        self._view_result_button = QPushButton("查看结果")
 
 
         self._send_button = QPushButton("Send")
@@ -136,9 +145,21 @@ class MainWindow(QMainWindow):
         self._auto_log_output = QTextEdit()
         self._auto_log_output.setReadOnly(True)
 
+        self._analysis_result_path = QLineEdit()
+        self._analysis_result_path.setReadOnly(True)
+        self._analysis_reload_button = QPushButton("刷新")
+        self._analysis_status_filter = QComboBox()
+        self._analysis_status_filter.addItems(["仅成功", "全部", "失败", "待定"])
+        self._analysis_keyword_filter = QLineEdit()
+        self._analysis_keyword_filter.setPlaceholderText("可选关键字过滤")
+        self._analysis_table = QTableWidget()
+        self._analysis_table.setAlternatingRowColors(True)
+
         self._step_send_buttons: list[QPushButton] = []
         self._auto_test_thread: QThread | None = None
         self._auto_test_worker: _AutoTestWorker | None = None
+        self._current_result_file_path: Path | None = None
+        self._analysis_rows: list[dict[str, str]] = []
 
         self._build_ui()
         self._bind_events()
@@ -155,6 +176,7 @@ class MainWindow(QMainWindow):
         self._mode_tabs = QTabWidget()
         self._mode_tabs.addTab(self._build_manual_tab(), "单步调试")
         self._mode_tabs.addTab(self._build_auto_tab(), "自动化测试")
+        self._mode_tabs.addTab(self._build_analysis_tab(), "结果分析")
 
         container = QWidget()
         root_layout = QVBoxLayout()
@@ -287,6 +309,13 @@ class MainWindow(QMainWindow):
         command_layout.addWidget(self._auto_command_input)
         command_group.setLayout(command_layout)
 
+        result_group = QGroupBox("运行结果")
+        result_layout = QHBoxLayout()
+        result_layout.addWidget(self._result_file_input)
+        result_layout.addWidget(self._open_result_dir_button)
+        result_layout.addWidget(self._view_result_button)
+        result_group.setLayout(result_layout)
+
         log_group = QGroupBox("Log Output")
         log_layout = QVBoxLayout()
         log_actions_layout = QHBoxLayout()
@@ -300,7 +329,37 @@ class MainWindow(QMainWindow):
         layout.addWidget(auto_group)
         layout.addLayout(config_actions_layout)
         layout.addWidget(command_group)
+        layout.addWidget(result_group)
         layout.addWidget(log_group, stretch=1)
+        tab.setLayout(layout)
+        return tab
+
+    def _build_analysis_tab(self) -> QWidget:
+        tab = QWidget()
+
+        source_group = QGroupBox("当前结果文件")
+        source_layout = QHBoxLayout()
+        source_layout.addWidget(self._analysis_result_path)
+        source_layout.addWidget(self._analysis_reload_button)
+        source_group.setLayout(source_layout)
+
+        filter_group = QGroupBox("过滤")
+        filter_layout = QHBoxLayout()
+        filter_layout.addWidget(QLabel("状态"))
+        filter_layout.addWidget(self._analysis_status_filter)
+        filter_layout.addWidget(QLabel("关键字"))
+        filter_layout.addWidget(self._analysis_keyword_filter)
+        filter_group.setLayout(filter_layout)
+
+        table_group = QGroupBox("结果明细")
+        table_layout = QVBoxLayout()
+        table_layout.addWidget(self._analysis_table)
+        table_group.setLayout(table_layout)
+
+        layout = QVBoxLayout()
+        layout.addWidget(source_group)
+        layout.addWidget(filter_group)
+        layout.addWidget(table_group, stretch=1)
         tab.setLayout(layout)
         return tab
 
@@ -322,6 +381,11 @@ class MainWindow(QMainWindow):
         self._auto_clear_log_button.clicked.connect(self.clear_auto_logs)
         self._start_test_button.clicked.connect(self._start_auto_test)
         self._stop_test_button.clicked.connect(self._stop_auto_test)
+        self._open_result_dir_button.clicked.connect(self._open_result_directory)
+        self._view_result_button.clicked.connect(self._jump_to_analysis_tab)
+        self._analysis_reload_button.clicked.connect(self._load_result_file_into_analysis)
+        self._analysis_status_filter.currentIndexChanged.connect(self._apply_analysis_filter)
+        self._analysis_keyword_filter.textChanged.connect(self._apply_analysis_filter)
 
     def _collect_manual_config(self) -> AppConfig:
         return AppConfig(
@@ -651,6 +715,7 @@ class MainWindow(QMainWindow):
 
     def _on_auto_test_finished(self, response: str) -> None:
         self._append_auto_log(response)
+        self._set_current_result_file(self._extract_result_file_path(response))
         self._auto_command_input.clear()
 
     def _on_auto_test_failed(self, error: str) -> None:
@@ -664,6 +729,111 @@ class MainWindow(QMainWindow):
         self._auto_test_worker = None
         self._start_test_button.setEnabled(True)
         self._stop_test_button.setEnabled(False)
+
+    def _set_current_result_file(self, path: Path | None) -> None:
+        self._current_result_file_path = path
+        text = str(path.resolve()) if path is not None else ""
+        self._result_file_input.setText(text)
+        self._analysis_result_path.setText(text)
+
+    @staticmethod
+    def _extract_result_file_path(response: str) -> Path | None:
+        patterns = [
+            r"CSV 输出:\s*([^，\n]+)",
+            r"输出文件:\s*([^\n]+)",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, response)
+            if not match:
+                continue
+            candidate = Path(match.group(1).strip())
+            if candidate.exists():
+                return candidate
+        return None
+
+    def _open_result_directory(self) -> None:
+        if self._current_result_file_path is None:
+            self._append_auto_log("当前没有可打开的结果文件路径。")
+            return
+        target_dir = self._current_result_file_path.parent
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(target_dir.resolve())))
+
+    def _jump_to_analysis_tab(self) -> None:
+        self._mode_tabs.setCurrentIndex(2)
+        self._load_result_file_into_analysis()
+
+    def _load_result_file_into_analysis(self) -> None:
+        path = self._current_result_file_path
+        if path is None or not path.exists():
+            self._analysis_rows = []
+            self._analysis_table.clear()
+            self._analysis_table.setRowCount(0)
+            self._analysis_table.setColumnCount(0)
+            return
+
+        if path.suffix.lower() == ".csv":
+            self._analysis_rows = self._read_csv_rows(path)
+        else:
+            self._analysis_rows = self._read_text_rows(path)
+        self._apply_analysis_filter()
+
+    @staticmethod
+    def _read_csv_rows(path: Path) -> list[dict[str, str]]:
+        with path.open("r", encoding="utf-8", newline="") as handle:
+            reader = csv.DictReader(handle)
+            rows: list[dict[str, str]] = []
+            for row in reader:
+                normalized = {key: str(value) for key, value in row.items() if key is not None}
+                status_symbol = normalized.get("final_result", "")
+                normalized["状态"] = {"O": "成功", "X": "失败", "P": "待定"}.get(status_symbol, "待定")
+                rows.append(normalized)
+            return rows
+
+    @staticmethod
+    def _read_text_rows(path: Path) -> list[dict[str, str]]:
+        content = path.read_text(encoding="utf-8")
+        chunks = [chunk.strip() for chunk in content.split("\n\n") if chunk.strip()]
+        rows: list[dict[str, str]] = []
+        for chunk in chunks:
+            lines = chunk.splitlines()
+            title = lines[0] if lines else ""
+            status = "成功" if "SUCCESS" in chunk.upper() else ("失败" if "FAIL" in chunk.upper() else "待定")
+            rows.append({"参数": title, "状态": status, "详情": chunk})
+        return rows
+
+    def _apply_analysis_filter(self) -> None:
+        rows = self._analysis_rows
+        status_text = self._analysis_status_filter.currentText()
+        keyword = self._analysis_keyword_filter.text().strip().lower()
+
+        def status_match(row: dict[str, str]) -> bool:
+            status = row.get("状态", "待定")
+            if status_text == "全部":
+                return True
+            if status_text == "仅成功":
+                return status == "成功"
+            if status_text == "失败":
+                return status == "失败"
+            return status == "待定"
+
+        filtered: list[dict[str, str]] = []
+        for row in rows:
+            if not status_match(row):
+                continue
+            if keyword:
+                haystack = " ".join(row.values()).lower()
+                if keyword not in haystack:
+                    continue
+            filtered.append(row)
+
+        headers = list(filtered[0].keys()) if filtered else list(rows[0].keys()) if rows else []
+        self._analysis_table.clear()
+        self._analysis_table.setRowCount(len(filtered))
+        self._analysis_table.setColumnCount(len(headers))
+        self._analysis_table.setHorizontalHeaderLabels(headers)
+        for row_index, row in enumerate(filtered):
+            for column_index, header in enumerate(headers):
+                self._analysis_table.setItem(row_index, column_index, QTableWidgetItem(row.get(header, "")))
 
     @staticmethod
     def _auto_range_errors(config: AppConfig) -> list[str]:
