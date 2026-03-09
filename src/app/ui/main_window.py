@@ -38,7 +38,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self, config_path: Path) -> None:
         super().__init__()
-        self.setWindowTitle("tool-001")
+        self.setWindowTitle("MTK 平台CAMERA CTLE参数筛选")
         self.resize(980, 620)
 
         self._config_manager = ConfigManager(config_path)
