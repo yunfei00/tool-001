@@ -37,6 +37,7 @@ class AppConfig:
     auto_eq_bw_start: int = 0
     auto_eq_bw_end: int = 3
     auto_eq_bw_values: list[int] | None = None
+    auto_manual_stream: bool = False
 
 
 class ConfigManager:
@@ -119,6 +120,7 @@ class ConfigManager:
             auto_eq_bw_values=self._normalize_integer_list(
                 raw_data.get("auto_eq_bw_values"), allowed={0, 1, 2, 3}
             ),
+            auto_manual_stream=self._normalize_is_dphy(raw_data.get("auto_manual_stream")),
         )
 
     def save(self, config: AppConfig) -> None:
