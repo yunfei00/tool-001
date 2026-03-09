@@ -41,6 +41,7 @@ class CommandProcessor:
     _SENTEST_REMOTE_PATH = "/data/local/tmp/sentest_v4l2"
     _ADB_SHORT_TIMEOUT_SECONDS = 10
     _ADB_STOP_TIMEOUT_SECONDS = 5
+    _STREAM_CHECK_TOKEN = "__STREAM_RUNNING__"
 
     def __init__(self) -> None:
         self._stream_processes: dict[tuple[str, int, int], subprocess.Popen[str]] = {}
@@ -190,6 +191,38 @@ class CommandProcessor:
         result = subprocess.run(check_cmd, check=False, capture_output=True, text=True)
         return result.returncode == 0 and "__EXISTS__" in (result.stdout or "")
 
+
+    def _is_remote_stream_running(self, *, adb_device: str) -> bool:
+        check_cmd = [
+            "adb",
+            "-s",
+            adb_device,
+            "shell",
+            (
+                "if ps -ef | grep -E '[s]entest_v4l2|[v]entest_4l2' >/dev/null; "
+                f"then echo {self._STREAM_CHECK_TOKEN}; fi"
+            ),
+        ]
+        result = subprocess.run(
+            check_cmd,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=self._ADB_SHORT_TIMEOUT_SECONDS,
+        )
+        return result.returncode == 0 and self._STREAM_CHECK_TOKEN in (result.stdout or "")
+
+    def _ensure_stream_for_config(self, config: AppConfig) -> bool:
+        """Ensure stream is running for automation; return True when stream was restarted."""
+        adb_device = config.adb_device
+        if not adb_device:
+            raise RuntimeError("No adb device selected.")
+        if self._is_remote_stream_running(adb_device=adb_device):
+            return False
+        sensor_mode = config.sensor_mode[0] if config.sensor_mode else 0
+        self._start_stream(adb_device=adb_device, sensor_idx=config.sensor_idx, sensor_mode=sensor_mode)
+        return True
+
     def _stop_stream(self, *, adb_device: str) -> None:
         stopped_any = False
         for target, process in list(self._stream_processes.items()):
@@ -325,6 +358,9 @@ class CommandProcessor:
                     if self._should_stop(should_stop_callback):
                         self._emit_progress(progress_callback, "收到停止请求，终止当前自动化任务。")
                         return
+                    if self._ensure_stream_for_config(run_config):
+                        applied_value = None
+                        self._emit_progress(progress_callback, "检测到流未运行，已重新起流并将重新发送命令。")
                     index += 1
                     self._emit_progress(
                         progress_callback,
@@ -379,6 +415,9 @@ class CommandProcessor:
                     if self._should_stop(should_stop_callback):
                         self._emit_progress(progress_callback, "收到停止请求，终止当前自动化任务。")
                         return count
+                    if self._ensure_stream_for_config(run_config):
+                        applied_values = {}
+                        self._emit_progress(progress_callback, "检测到流未运行，已重新起流并将重新发送全部步骤命令。")
                     index += 1
                     progress_detail = ", ".join(f"{step}={value}" for step, value in zip(steps, values))
                     self._emit_progress(
@@ -414,11 +453,7 @@ class CommandProcessor:
         return count
 
     def _start_stream_for_config(self, config: AppConfig) -> None:
-        adb_device = config.adb_device
-        if not adb_device:
-            raise RuntimeError("No adb device selected.")
-        sensor_mode = config.sensor_mode[0] if config.sensor_mode else 0
-        self._start_stream(adb_device=adb_device, sensor_idx=config.sensor_idx, sensor_mode=sensor_mode)
+        self._ensure_stream_for_config(config)
 
 
     @staticmethod
