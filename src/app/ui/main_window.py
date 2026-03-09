@@ -224,17 +224,46 @@ class MainWindow(QMainWindow):
         auto_group = QGroupBox("Auto Parameters")
         auto_layout = QVBoxLayout()
         auto_form = QFormLayout()
+        auto_form.addRow("压测次数", self._auto_loop_count)
         auto_form.addRow("Sensor idx", self._auto_sensor_idx)
         auto_form.addRow("Sensor mode", self._auto_sensor_mode)
-        auto_form.addRow("CDR delay", self._auto_range_row(self._auto_cdr_delay_start, self._auto_cdr_delay_end, self._auto_is_dphy))
-        auto_form.addRow("EQ offset", self._auto_range_row(self._auto_eq_offset_start, self._auto_eq_offset_end))
-        auto_form.addRow("EQ dg0 enable", self._auto_eq_dg0_enable)
-        auto_form.addRow("EQ sr0", self._auto_range_row(self._auto_eq_sr0_start, self._auto_eq_sr0_end))
-        auto_form.addRow("EQ dg1 enable", self._auto_eq_dg1_enable)
-        auto_form.addRow("EQ sr1", self._auto_range_row(self._auto_eq_sr1_start, self._auto_eq_sr1_end))
-        auto_form.addRow("EQ bw", self._auto_eq_bw)
+        auto_form.addRow(
+            "CDR delay",
+            self._auto_range_row(
+                self._auto_cdr_delay_start,
+                self._auto_cdr_delay_end,
+                self._auto_is_dphy,
+                range_text="范围: 0~31(CPHY)/0~254(DPHY)",
+            ),
+        )
+        auto_form.addRow(
+            "EQ offset",
+            self._auto_range_row(
+                self._auto_eq_offset_start,
+                self._auto_eq_offset_end,
+                range_text="范围: -31~31",
+            ),
+        )
+        auto_form.addRow("EQ dg0 enable", self._with_auto_range_hint(self._auto_eq_dg0_enable, "范围: 0/1"))
+        auto_form.addRow(
+            "EQ sr0",
+            self._auto_range_row(
+                self._auto_eq_sr0_start,
+                self._auto_eq_sr0_end,
+                range_text="范围: 0~15",
+            ),
+        )
+        auto_form.addRow("EQ dg1 enable", self._with_auto_range_hint(self._auto_eq_dg1_enable, "范围: 0/1"))
+        auto_form.addRow(
+            "EQ sr1",
+            self._auto_range_row(
+                self._auto_eq_sr1_start,
+                self._auto_eq_sr1_end,
+                range_text="范围: 0~15",
+            ),
+        )
+        auto_form.addRow("EQ bw", self._with_auto_range_hint(self._auto_eq_bw, "范围: 0/1/2/3"))
         auto_form.addRow("相机起流", self._auto_manual_stream)
-        auto_form.addRow("压测次数", self._auto_loop_count)
         auto_layout.addLayout(auto_form)
         auto_actions_layout = QHBoxLayout()
         auto_actions_layout.addWidget(self._start_test_button)
@@ -463,7 +492,14 @@ class MainWindow(QMainWindow):
         row.setLayout(layout)
         return row
 
-    def _auto_range_row(self, start_widget: QWidget, end_widget: QWidget, extra_widget: QWidget | None = None) -> QWidget:
+    def _auto_range_row(
+        self,
+        start_widget: QWidget,
+        end_widget: QWidget,
+        extra_widget: QWidget | None = None,
+        *,
+        range_text: str = "",
+    ) -> QWidget:
         row = QWidget()
         layout = QHBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
@@ -475,6 +511,18 @@ class MainWindow(QMainWindow):
         layout.addWidget(end_widget)
         if extra_widget is not None:
             layout.addWidget(extra_widget)
+        if range_text:
+            layout.addWidget(QLabel(range_text))
+        layout.addStretch(1)
+        row.setLayout(layout)
+        return row
+
+    def _with_auto_range_hint(self, field: QWidget, hint: str) -> QWidget:
+        row = QWidget()
+        layout = QHBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(field)
+        layout.addWidget(QLabel(hint))
         layout.addStretch(1)
         row.setLayout(layout)
         return row
@@ -548,46 +596,25 @@ class MainWindow(QMainWindow):
         self._append_manual_log(response)
 
     def _start_auto_test(self) -> None:
-        self._append_auto_log("[debug] 点击开始测试，开始校验自动化任务状态。")
         if self._auto_test_thread is not None:
             self._append_auto_log("自动化测试正在运行，请等待当前任务完成。")
             return
 
         if not self._selected_auto_adb_device():
-            self._append_auto_log("[debug] 开始测试失败：当前未选择ADB设备。")
             self._append_auto_log("No adb device selected. Please scan and choose one device first.")
             return
 
-        self._append_auto_log("[debug] 已检测到ADB设备，开始收集自动化配置。")
         config = self._collect_auto_config()
-        self._append_auto_log(
-            "[debug] 自动化配置摘要："
-            f"device={config.adb_device}, "
-            f"sensor_idx={config.auto_sensor_idx}, "
-            f"sensor_mode={config.sensor_mode}, "
-            f"manual_stream={config.auto_manual_stream}, "
-            f"loops={config.auto_loop_count}, "
-            f"cdr={config.auto_cdr_delay_start}-{config.auto_cdr_delay_end}, "
-            f"eq_offset={config.auto_eq_offset_start}-{config.auto_eq_offset_end}"
-        )
         range_errors = self._auto_range_errors(config)
         if range_errors:
-            self._append_auto_log("[debug] 开始测试失败：参数范围校验未通过。")
             self._append_auto_log("自动化测试参数范围错误:\n" + "\n".join(range_errors))
             return
 
         command = self._auto_command_input.text().strip()
-        self._append_auto_log(f"[debug] 用户输入步骤：{command or '<默认步骤>'}")
-
-        estimated_cases = self._command_processor.estimate_auto_cases(config, command)
-        self._append_auto_log(f"[debug] 预计组合数计算完成：{estimated_cases}")
 
         self._start_test_button.setEnabled(False)
         self._stop_test_button.setEnabled(True)
-        self._append_auto_log(
-            "自动化测试已启动，请稍候..."
-            f"（预计组合数={estimated_cases}）"
-        )
+        self._append_auto_log("自动化测试已启动。")
 
         self._auto_test_thread = QThread(self)
         self._auto_test_worker = _AutoTestWorker(self._command_processor, config, command)
@@ -599,9 +626,7 @@ class MainWindow(QMainWindow):
         self._auto_test_worker.progress.connect(self._append_auto_log)
         self._auto_test_worker.finished.connect(self._cleanup_auto_test_thread)
         self._auto_test_worker.failed.connect(self._cleanup_auto_test_thread)
-        self._append_auto_log("[debug] 自动化任务线程和worker已创建，准备启动线程。")
         self._auto_test_thread.start()
-        self._append_auto_log("[debug] 自动化任务线程已调用start。")
 
     def _stop_auto_test(self) -> None:
         if self._auto_test_worker is None:
@@ -612,16 +637,13 @@ class MainWindow(QMainWindow):
         self._append_auto_log("已发送停止请求，等待当前步骤结束...")
 
     def _on_auto_test_finished(self, response: str) -> None:
-        self._append_auto_log("[debug] 自动化任务已完成，收到finished信号。")
         self._append_auto_log(response)
         self._auto_command_input.clear()
 
     def _on_auto_test_failed(self, error: str) -> None:
-        self._append_auto_log("[debug] 自动化任务失败，收到failed信号。")
         self._append_auto_log(f"自动化测试执行失败: {error}")
 
     def _cleanup_auto_test_thread(self) -> None:
-        self._append_auto_log("[debug] 开始清理自动化线程资源。")
         if self._auto_test_thread is not None:
             self._auto_test_thread.quit()
             self._auto_test_thread.wait()
@@ -629,7 +651,6 @@ class MainWindow(QMainWindow):
         self._auto_test_worker = None
         self._start_test_button.setEnabled(True)
         self._stop_test_button.setEnabled(False)
-        self._append_auto_log("[debug] 自动化线程资源清理完成。")
 
     @staticmethod
     def _auto_range_errors(config: AppConfig) -> list[str]:
@@ -666,8 +687,6 @@ class _AutoTestWorker(QObject):
         return self._stop_requested
 
     def run(self) -> None:
-        self.progress.emit("自动化任务线程已启动。")
-        self.progress.emit("[debug] worker.run 开始执行 run_automated_test。")
         try:
             response = self._command_processor.run_automated_test(
                 self._config,
@@ -676,10 +695,8 @@ class _AutoTestWorker(QObject):
                 should_stop_callback=self._should_stop,
             )
         except Exception as error:  # noqa: BLE001
-            self.progress.emit(f"[debug] worker.run 捕获异常：{error}")
             self.failed.emit(str(error))
             return
-        self.progress.emit("[debug] worker.run 执行完成，准备发送 finished 信号。")
         self.finished.emit(response)
 
 
