@@ -7,6 +7,7 @@ from collections.abc import Callable
 import time
 import shlex
 import csv
+import os
 import subprocess
 from typing import TextIO
 
@@ -434,6 +435,7 @@ class CommandProcessor:
         with csv_path.open("w", newline="", encoding="utf-8") as handle:
             writer = csv.writer(handle)
             writer.writerow(header)
+            self._flush_file(handle)
             index = 0
             for round_index in range(1, loop_count + 1):
                 round_start = time.perf_counter()
@@ -479,10 +481,16 @@ class CommandProcessor:
                             applied_values[step] = value
                         detail_log.write("\n")
                         writer.writerow([round_index, sensor_idx, sensor_mode, *values, self._result_symbol(final_result)])
+                        self._flush_file(handle)
                         count += 1
                 round_elapsed = time.perf_counter() - round_start
                 self._emit_progress(progress_callback, f"次数-{round_index}/{loop_count} 压测完成 用时={round_elapsed:.3f}s")
         return count, total_elapsed
+
+    @staticmethod
+    def _flush_file(handle: TextIO) -> None:
+        handle.flush()
+        os.fsync(handle.fileno())
 
     @staticmethod
     def _result_symbol(result_text: str) -> str:
