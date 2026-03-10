@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
+    QLabel,
     QLineEdit,
     QPushButton,
     QTextEdit,
@@ -107,10 +108,11 @@ class SerialCommandPanel(QWidget):
 
         adb_port_row = QHBoxLayout()
         adb_port_row.addWidget(self._adb_device_combo)
+        adb_port_row.addWidget(QLabel("串口"))
         adb_port_row.addWidget(self._port_combo)
         adb_port_row.addWidget(self._refresh_adb_button)
         adb_port_row.addStretch(1)
-        form.addRow("设备序列号 / 串口 / 扫描 ADB", self._with_layout_widget(adb_port_row))
+        form.addRow("设备序列号", self._with_layout_widget(adb_port_row))
 
         form.addRow("波特率", self._baudrate_combo)
 
@@ -421,16 +423,14 @@ class SerialCommandPanel(QWidget):
 
     @Slot(str)
     def _handle_received_data(self, payload: str) -> None:
-        self._append_log(payload)
+        self._append_log(f"返回命令: {payload}")
 
     def _append_send_results(self, results: list[dict[str, str | bool]]) -> None:
         port = self._command_service.opened_port or "-"
         for item in results:
-            status = "成功" if item["success"] else "失败"
-            log_line = (
-                f"[{item['timestamp']}] 端口={port} 命令={item['command']} 状态={status} "
-                f"错误={item['error'] or '-'}"
-            )
+            log_line = f"[{item['timestamp']}] 端口={port} 命令={item['command']}"
+            if not item["success"]:
+                log_line += f" 状态=失败 错误={item['error'] or '-'}"
             self._append_log(log_line)
 
     def _append_log(self, message: str) -> None:
