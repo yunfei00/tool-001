@@ -29,6 +29,8 @@ class SerialCommandResult:
 class SerialCommandService:
     def __init__(self, serial_port_service: SerialPortService | None = None) -> None:
         self._serial_port_service = serial_port_service or SerialPortService()
+        self._connection = None
+        self._opened_settings: SerialPortSettings | None = None
 
     @staticmethod
     def default_commands_text() -> str:
@@ -103,4 +105,59 @@ class SerialCommandService:
                             timestamp=timestamp,
                         )
                     )
+        return [item.to_dict() for item in results]
+
+    @property
+    def is_open(self) -> bool:
+        return bool(self._connection and getattr(self._connection, "is_open", False))
+
+    @property
+    def opened_port(self) -> str:
+        if not self._opened_settings:
+            return ""
+        return self._opened_settings.port
+
+    def open_connection(self, settings: SerialPortSettings) -> None:
+        self.close_connection()
+        self._connection = self._serial_port_service.open_port(settings)
+        self._opened_settings = settings
+
+    def close_connection(self) -> None:
+        if self._connection:
+            try:
+                self._connection.close()
+            finally:
+                self._connection = None
+                self._opened_settings = None
+
+    def send_with_opened_connection(self, commands: list[str]) -> list[dict[str, str | bool]]:
+        if not commands:
+            return []
+        if not self.is_open or self._connection is None:
+            raise RuntimeError("串口未打开，请先打开串口")
+
+        results: list[SerialCommandResult] = []
+        for command in commands:
+            timestamp = datetime.now().isoformat(timespec="seconds")
+            try:
+                response = self._serial_port_service.send_and_receive(self._connection, command)
+                results.append(
+                    SerialCommandResult(
+                        command=command,
+                        success=True,
+                        response=response,
+                        error="",
+                        timestamp=timestamp,
+                    )
+                )
+            except Exception as error:  # noqa: BLE001
+                results.append(
+                    SerialCommandResult(
+                        command=command,
+                        success=False,
+                        response="",
+                        error=str(error),
+                        timestamp=timestamp,
+                    )
+                )
         return [item.to_dict() for item in results]
