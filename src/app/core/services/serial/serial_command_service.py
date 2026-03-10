@@ -60,6 +60,23 @@ class SerialCommandService:
 
         raise ValueError("仅支持导入 txt 或 json 文件")
 
+    def export_commands_to_file(self, file_path: Path, commands: list[str]) -> None:
+        suffix = file_path.suffix.lower()
+        if suffix == ".txt":
+            payload = "\n".join(commands)
+            file_path.write_text(payload, encoding="utf-8")
+            return
+
+        if suffix == ".json":
+            payload = {"commands": commands}
+            file_path.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            return
+
+        raise ValueError("仅支持导出 txt 或 json 文件")
+
     def send_commands(self, settings: SerialPortSettings, commands: list[str]) -> list[dict[str, str | bool]]:
         if not commands:
             return []
