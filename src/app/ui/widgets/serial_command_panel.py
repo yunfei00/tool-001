@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from datetime import datetime
+
 from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot
 from PySide6.QtWidgets import (
     QComboBox,
@@ -102,13 +104,13 @@ class SerialCommandPanel(QWidget):
 
     def _build_ui(self) -> None:
         form = QFormLayout()
-        form.addRow("ADB 设备序列号", self._adb_device_combo)
-        form.addRow("串口", self._port_combo)
 
-        adb_actions = QHBoxLayout()
-        adb_actions.addWidget(self._refresh_adb_button)
-        adb_actions.addStretch(1)
-        form.addRow("ADB 操作", self._with_layout_widget(adb_actions))
+        adb_port_row = QHBoxLayout()
+        adb_port_row.addWidget(self._adb_device_combo)
+        adb_port_row.addWidget(self._port_combo)
+        adb_port_row.addWidget(self._refresh_adb_button)
+        adb_port_row.addStretch(1)
+        form.addRow("设备序列号 / 串口 / 扫描 ADB", self._with_layout_widget(adb_port_row))
 
         form.addRow("波特率", self._baudrate_combo)
 
@@ -419,7 +421,7 @@ class SerialCommandPanel(QWidget):
 
     @Slot(str)
     def _handle_received_data(self, payload: str) -> None:
-        self._append_log(f"串口返回: {payload}")
+        self._append_log(payload)
 
     def _append_send_results(self, results: list[dict[str, str | bool]]) -> None:
         port = self._command_service.opened_port or "-"
@@ -432,7 +434,9 @@ class SerialCommandPanel(QWidget):
             self._append_log(log_line)
 
     def _append_log(self, message: str) -> None:
-        self._log_output.append(message)
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+        lines = message.splitlines() or [""]
+        self._log_output.append("\n".join(f"[{timestamp}] {line}" for line in lines))
 
     @staticmethod
     def _with_layout_widget(layout: QHBoxLayout) -> QWidget:
