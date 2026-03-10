@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 
 from app.core.services.serial.serial_command_service import SerialCommandService
 from app.core.services.serial.serial_port_service import SerialPortService
+from app.core.adb_device_service import AdbDeviceService
 
 
 class SerialCommandPanel(QWidget):
@@ -23,8 +24,13 @@ class SerialCommandPanel(QWidget):
         super().__init__()
         self._port_service = SerialPortService()
         self._command_service = SerialCommandService(self._port_service)
+        self._adb_device_service = AdbDeviceService()
 
         self._title = QGroupBox(title)
+        self._adb_device_combo = QComboBox()
+        self._refresh_adb_button = QPushButton("扫描 ADB")
+        self._adb_devices: list[str] = []
+
         self._port_combo = QComboBox()
         self._refresh_port_button = QPushButton("扫描串口")
 
@@ -62,10 +68,16 @@ class SerialCommandPanel(QWidget):
 
         self._build_ui()
         self._bind_events()
+        self._refresh_adb_devices()
         self._refresh_ports()
 
     def _build_ui(self) -> None:
         form = QFormLayout()
+        adb_row = QHBoxLayout()
+        adb_row.addWidget(self._adb_device_combo)
+        adb_row.addWidget(self._refresh_adb_button)
+        form.addRow("ADB 设备", self._with_layout_widget(adb_row))
+
         port_row = QHBoxLayout()
         port_row.addWidget(self._port_combo)
         port_row.addWidget(self._refresh_port_button)
@@ -102,9 +114,22 @@ class SerialCommandPanel(QWidget):
         self.setLayout(root)
 
     def _bind_events(self) -> None:
+        self._refresh_adb_button.clicked.connect(self._refresh_adb_devices)
         self._refresh_port_button.clicked.connect(self._refresh_ports)
         self._import_button.clicked.connect(self._import_commands)
         self._send_button.clicked.connect(self._send_commands)
+
+    def _refresh_adb_devices(self) -> None:
+        devices, _ = self._adb_device_service.list_devices()
+        self._adb_devices = devices
+        self._adb_device_combo.clear()
+        if devices:
+            self._adb_device_combo.addItems(devices)
+            self._adb_device_combo.setEnabled(True)
+            return
+
+        self._adb_device_combo.addItem("<no adb device>")
+        self._adb_device_combo.setEnabled(False)
 
     def _refresh_ports(self) -> None:
         self._port_combo.clear()
@@ -117,6 +142,10 @@ class SerialCommandPanel(QWidget):
             self._port_combo.addItem(label, port["port"])
         if not ports:
             self._append_log("未扫描到可用串口")
+
+    def refresh_devices(self) -> None:
+        self._refresh_adb_devices()
+        self._refresh_ports()
 
     def _import_commands(self) -> None:
         selected, _ = QFileDialog.getOpenFileName(
