@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QSizePolicy,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -63,11 +64,6 @@ class SerialCommandPanel(QWidget):
 
         self._port_combo = QComboBox()
 
-        self._baudrate_combo = QComboBox()
-        self._baudrate_combo.setEditable(True)
-        self._baudrate_combo.addItems(["9600", "115200", "230400", "460800", "921600"])
-        self._baudrate_combo.setCurrentText("9600")
-
         self._open_port_button = QPushButton("打开串口")
         self._close_port_button = QPushButton("关闭串口")
         self._close_port_button.setEnabled(False)
@@ -106,21 +102,20 @@ class SerialCommandPanel(QWidget):
     def _build_ui(self) -> None:
         form = QFormLayout()
 
-        adb_port_row = QHBoxLayout()
-        adb_port_row.addWidget(self._adb_device_combo)
-        adb_port_row.addWidget(QLabel("串口"))
-        adb_port_row.addWidget(self._port_combo)
-        adb_port_row.addWidget(self._refresh_adb_button)
-        adb_port_row.addStretch(1)
-        form.addRow("设备序列号", self._with_layout_widget(adb_port_row))
+        self._adb_device_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self._port_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
-        form.addRow("波特率", self._baudrate_combo)
+        adb_port_row = QHBoxLayout()
+        adb_port_row.addWidget(self._adb_device_combo, 3)
+        adb_port_row.addWidget(QLabel("串口"))
+        adb_port_row.addWidget(self._port_combo, 3)
+        adb_port_row.addWidget(self._refresh_adb_button)
+        form.addRow("设备序列号", self._with_layout_widget(adb_port_row))
 
         port_actions = QHBoxLayout()
         port_actions.addWidget(self._open_port_button)
         port_actions.addWidget(self._close_port_button)
-        port_actions.addStretch(1)
-        form.addRow("串口操作", self._with_layout_widget(port_actions))
+        form.addRow(self._with_layout_widget(port_actions))
 
         command_group = QGroupBox("命令输入")
         command_layout = QVBoxLayout()
@@ -348,7 +343,7 @@ class SerialCommandPanel(QWidget):
         return self._port_service.validate_settings(
             {
                 "port": port,
-                "baudrate": self._baudrate_combo.currentText(),
+                "baudrate": 9600,
             }
         )
 
@@ -426,15 +421,14 @@ class SerialCommandPanel(QWidget):
         self._append_log(f"返回命令: {payload}")
 
     def _append_send_results(self, results: list[dict[str, str | bool]]) -> None:
-        port = self._command_service.opened_port or "-"
         for item in results:
-            log_line = f"[{item['timestamp']}] 端口={port} 命令={item['command']}"
-            if not item["success"]:
-                log_line += f" 状态=失败 错误={item['error'] or '-'}"
+            log_line = f"发送命令: {item['command']}"
+            if not item["success"] and item["error"]:
+                log_line += f" (失败: {item['error']})"
             self._append_log(log_line)
 
     def _append_log(self, message: str) -> None:
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+        timestamp = datetime.now().strftime("%H:%M:%S")
         lines = message.splitlines() or [""]
         self._log_output.append("\n".join(f"[{timestamp}] {line}" for line in lines))
 
