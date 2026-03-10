@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
@@ -52,11 +53,18 @@ class SerialCommandPanel(QWidget):
 
         self._log_output = QTextEdit()
         self._log_output.setReadOnly(True)
+        self._clear_log_button = QPushButton("清除日志")
+
+        self._last_binding_hint = ""
+        self._last_device_snapshot: tuple[tuple[str, ...], tuple[str, ...]] | None = None
+        self._device_watch_timer = QTimer(self)
+        self._device_watch_timer.setInterval(2000)
 
         self._build_ui()
         self._bind_events()
         self._refresh_adb_devices()
         self._refresh_ports()
+        self._device_watch_timer.start()
 
     def _build_ui(self) -> None:
         form = QFormLayout()
@@ -89,6 +97,10 @@ class SerialCommandPanel(QWidget):
 
         log_group = QGroupBox("串口日志")
         log_layout = QVBoxLayout()
+        log_actions = QHBoxLayout()
+        log_actions.addStretch(1)
+        log_actions.addWidget(self._clear_log_button)
+        log_layout.addLayout(log_actions)
         log_layout.addWidget(self._log_output)
         log_group.setLayout(log_layout)
 
@@ -110,19 +122,32 @@ class SerialCommandPanel(QWidget):
         self._open_port_button.clicked.connect(self._open_serial_port)
         self._close_port_button.clicked.connect(self._close_serial_port)
         self._send_button.clicked.connect(self._send_commands)
+        self._clear_log_button.clicked.connect(self._log_output.clear)
+        self._device_watch_timer.timeout.connect(self._watch_device_topology)
 
-    def _refresh_adb_devices(self) -> None:
+    def _refresh_adb_devices(self, *, should_log: bool = True) -> None:
         devices, _ = self._adb_device_service.list_devices()
+        previous = self._adb_device_combo.currentText().strip()
         self._adb_devices = devices
+
+        self._adb_device_combo.blockSignals(True)
         self._adb_device_combo.clear()
         if devices:
             self._adb_device_combo.addItems(devices)
             self._adb_device_combo.setEnabled(True)
+            if previous in devices:
+                self._adb_device_combo.setCurrentText(previous)
+            elif len(devices) == 1:
+                self._adb_device_combo.setCurrentText(devices[0])
+            self._adb_device_combo.blockSignals(False)
             self._refresh_ports()
             return
 
         self._adb_device_combo.addItem("<no adb device>")
         self._adb_device_combo.setEnabled(False)
+        self._adb_device_combo.blockSignals(False)
+        if should_log:
+            self._append_log("未检测到 ADB 设备")
         self._refresh_ports()
 
     def _refresh_ports(self) -> None:
@@ -130,15 +155,25 @@ class SerialCommandPanel(QWidget):
         ports = self._port_service.list_available_ports()
         selected_adb = self._adb_device_combo.currentText().strip()
 
+        pcui_ports = [
+            port
+            for port in ports
+            if "pcui" in (port["description"] or "").lower()
+        ]
+
         matched_ports = []
-        for port in ports:
-            description = (port["description"] or "").lower()
-            serial_number = (port["serial_number"] or "").strip()
-            if "pcui" not in description:
-                continue
-            if selected_adb and selected_adb != "<no adb device>" and serial_number != selected_adb:
-                continue
-            matched_ports.append(port)
+        if len(self._adb_devices) == 1 and len(pcui_ports) == 1:
+            matched_ports = [pcui_ports[0]]
+            self._append_binding_hint("已自动绑定唯一设备与 PCUI 串口")
+        elif len(self._adb_devices) > 1 or len(pcui_ports) > 1:
+            self._append_binding_hint("检测到多台 USB 设备，请移除多余设备，仅保留一台后再绑定")
+        elif selected_adb and selected_adb != "<no adb device>":
+            for port in pcui_ports:
+                serial_number = (port["serial_number"] or "").strip()
+                if serial_number and serial_number == selected_adb:
+                    matched_ports.append(port)
+            if matched_ports:
+                self._append_binding_hint("已按序列号匹配 PCUI 串口")
 
         for port in matched_ports:
             label = (
@@ -153,6 +188,28 @@ class SerialCommandPanel(QWidget):
     def refresh_devices(self) -> None:
         self._refresh_adb_devices()
         self._refresh_ports()
+
+    def _watch_device_topology(self) -> None:
+        devices, _ = self._adb_device_service.list_devices()
+        ports = self._port_service.list_available_ports()
+        pcui_names = tuple(
+            sorted(
+                port["port"]
+                for port in ports
+                if "pcui" in (port["description"] or "").lower()
+            )
+        )
+        snapshot = (tuple(sorted(devices)), pcui_names)
+        if snapshot == self._last_device_snapshot:
+            return
+        self._last_device_snapshot = snapshot
+        self._refresh_adb_devices(should_log=False)
+
+    def _append_binding_hint(self, message: str) -> None:
+        if message == self._last_binding_hint:
+            return
+        self._last_binding_hint = message
+        self._append_log(message)
 
     def _import_commands(self) -> None:
         selected, _ = QFileDialog.getOpenFileName(
