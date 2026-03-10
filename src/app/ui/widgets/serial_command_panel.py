@@ -6,7 +6,6 @@ from datetime import datetime
 
 from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot
 from PySide6.QtWidgets import (
-    QCheckBox,
     QComboBox,
     QFileDialog,
     QFormLayout,
@@ -61,9 +60,6 @@ class SerialCommandPanel(QWidget):
 
         self._title = QGroupBox(title)
         self._adb_device_combo = QComboBox()
-        self._serial_port_inline_checkbox = QCheckBox("串口")
-        self._serial_port_inline_checkbox.setChecked(True)
-        self._serial_port_inline_checkbox.setEnabled(False)
         self._refresh_adb_button = QPushButton("扫描 ADB")
         self._adb_devices: list[str] = []
 
@@ -75,6 +71,7 @@ class SerialCommandPanel(QWidget):
 
         self._single_command_input = QLineEdit()
         self._single_command_input.setPlaceholderText("输入单条 AT 命令")
+        self._single_command_input.setText(self._draft_store.load_single_command())
         self._single_send_button = QPushButton("发送单条")
 
         self._command_editor = QTextEdit()
@@ -113,15 +110,10 @@ class SerialCommandPanel(QWidget):
 
         adb_row = QHBoxLayout()
         adb_row.setContentsMargins(0, 0, 0, 0)
-        adb_row.addWidget(self._serial_port_inline_checkbox)
         adb_row.addWidget(self._adb_device_combo, 1)
+        adb_row.addWidget(self._port_combo, 1)
         adb_row.addWidget(self._refresh_adb_button)
         form.addRow("设备序列号", self._with_layout_widget(adb_row))
-
-        port_row = QHBoxLayout()
-        port_row.setContentsMargins(0, 0, 0, 0)
-        port_row.addWidget(self._port_combo, 1)
-        form.addRow("", self._with_layout_widget(port_row))
 
         port_actions = QHBoxLayout()
         port_actions.addWidget(self._open_port_button)
@@ -178,6 +170,7 @@ class SerialCommandPanel(QWidget):
         self._clear_log_button.clicked.connect(self._log_output.clear)
         self._device_watch_timer.timeout.connect(self._watch_device_topology)
         self._command_editor.textChanged.connect(self._save_command_editor_text)
+        self._single_command_input.textChanged.connect(self._save_single_command_text)
 
     def _refresh_adb_devices(self, *, should_log: bool = True) -> None:
         devices, _ = self._adb_device_service.list_devices()
@@ -359,6 +352,9 @@ class SerialCommandPanel(QWidget):
 
     def _save_command_editor_text(self) -> None:
         self._draft_store.save(self._command_editor.toPlainText())
+
+    def _save_single_command_text(self) -> None:
+        self._draft_store.save_single_command(self._single_command_input.text())
 
     def _build_settings(self):
         port = self._port_combo.currentData()
