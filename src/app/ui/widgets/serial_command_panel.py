@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot
 from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
+    QLineEdit,
     QPushButton,
     QTextEdit,
     QVBoxLayout,
@@ -19,6 +20,28 @@ from app.core.services.serial.serial_command_service import SerialCommandService
 from app.core.services.serial.serial_binding_store import SerialBindingStore
 from app.core.services.serial.serial_port_service import SerialPortService
 from app.core.adb_device_service import AdbDeviceService
+
+
+class _SerialReceiverWorker(QObject):
+    received = Signal(str)
+    finished = Signal()
+
+    def __init__(self, command_service: SerialCommandService) -> None:
+        super().__init__()
+        self._command_service = command_service
+        self._running = True
+
+    @Slot()
+    def run(self) -> None:
+        while self._running:
+            payload = self._command_service.receive_with_opened_connection()
+            if payload:
+                self.received.emit(payload)
+            QThread.msleep(100)
+        self.finished.emit()
+
+    def stop(self) -> None:
+        self._running = False
 
 
 class SerialCommandPanel(QWidget):
@@ -46,13 +69,16 @@ class SerialCommandPanel(QWidget):
         self._close_port_button = QPushButton("关闭串口")
         self._close_port_button.setEnabled(False)
 
+        self._single_command_input = QLineEdit()
+        self._single_command_input.setPlaceholderText("输入单条 AT 命令")
+        self._single_send_button = QPushButton("发送单条")
+
         self._command_editor = QTextEdit()
         self._command_editor.setPlaceholderText("支持手工输入/导入，一行一条命令，空行自动忽略")
         self._command_editor.setPlainText(self._command_service.default_commands_text())
 
         self._import_button = QPushButton("导入命令")
         self._export_button = QPushButton("导出命令")
-        self._send_next_button = QPushButton("发送下一条")
         self._send_button = QPushButton("发送全部")
 
         self._log_output = QTextEdit()
@@ -65,21 +91,25 @@ class SerialCommandPanel(QWidget):
         self._device_watch_timer = QTimer(self)
         self._device_watch_timer.setInterval(2000)
 
+        self._receiver_thread: QThread | None = None
+        self._receiver_worker: _SerialReceiverWorker | None = None
+
         self._build_ui()
         self._bind_events()
         self._refresh_adb_devices()
         self._refresh_ports()
-        self._next_command_index = 0
         self._device_watch_timer.start()
 
     def _build_ui(self) -> None:
         form = QFormLayout()
-        adb_row = QHBoxLayout()
-        adb_row.addWidget(self._adb_device_combo)
-        adb_row.addWidget(self._refresh_adb_button)
-        form.addRow("ADB 设备", self._with_layout_widget(adb_row))
-
+        form.addRow("ADB 设备序列号", self._adb_device_combo)
         form.addRow("串口", self._port_combo)
+
+        adb_actions = QHBoxLayout()
+        adb_actions.addWidget(self._refresh_adb_button)
+        adb_actions.addStretch(1)
+        form.addRow("ADB 操作", self._with_layout_widget(adb_actions))
+
         form.addRow("波特率", self._baudrate_combo)
 
         port_actions = QHBoxLayout()
@@ -90,10 +120,15 @@ class SerialCommandPanel(QWidget):
 
         command_group = QGroupBox("命令输入")
         command_layout = QVBoxLayout()
+
+        single_command_layout = QHBoxLayout()
+        single_command_layout.addWidget(self._single_command_input)
+        single_command_layout.addWidget(self._single_send_button)
+        command_layout.addLayout(single_command_layout)
+
         command_actions = QHBoxLayout()
         command_actions.addWidget(self._import_button)
         command_actions.addWidget(self._export_button)
-        command_actions.addWidget(self._send_next_button)
         command_actions.addWidget(self._send_button)
         command_actions.addStretch(1)
         command_layout.addLayout(command_actions)
@@ -126,11 +161,10 @@ class SerialCommandPanel(QWidget):
         self._export_button.clicked.connect(self._export_commands)
         self._open_port_button.clicked.connect(self._open_serial_port)
         self._close_port_button.clicked.connect(self._close_serial_port)
-        self._send_next_button.clicked.connect(self._send_next_command)
+        self._single_send_button.clicked.connect(self._send_single_command)
         self._send_button.clicked.connect(self._send_commands)
         self._clear_log_button.clicked.connect(self._log_output.clear)
         self._device_watch_timer.timeout.connect(self._watch_device_topology)
-        self._command_editor.textChanged.connect(self._reset_step_progress)
 
     def _refresh_adb_devices(self, *, should_log: bool = True) -> None:
         devices, _ = self._adb_device_service.list_devices()
@@ -276,11 +310,7 @@ class SerialCommandPanel(QWidget):
             return
 
         self._command_editor.setPlainText("\n".join(commands))
-        self._next_command_index = 0
         self._append_log(f"导入完成，共 {len(commands)} 条命令")
-
-    def _reset_step_progress(self) -> None:
-        self._next_command_index = 0
 
     def _export_commands(self) -> None:
         commands = self._command_service.parse_commands(self._command_editor.toPlainText())
@@ -309,26 +339,6 @@ class SerialCommandPanel(QWidget):
 
         self._append_log(f"导出完成: {target}")
 
-    def _send_next_command(self) -> None:
-        commands = self._command_service.parse_commands(self._command_editor.toPlainText())
-        if not commands:
-            self._append_log("没有可发送的命令")
-            return
-
-        if self._next_command_index >= len(commands):
-            self._next_command_index = 0
-
-        command = commands[self._next_command_index]
-        try:
-            results = self._command_service.send_with_opened_connection([command])
-        except Exception as error:  # noqa: BLE001
-            self._append_log(f"发送失败: {error}")
-            return
-
-        self._next_command_index += 1
-        self._append_send_results(results)
-        self._append_log(f"单步进度: {self._next_command_index}/{len(commands)}")
-
     def _build_settings(self):
         port = self._port_combo.currentData()
         return self._port_service.validate_settings(
@@ -346,17 +356,33 @@ class SerialCommandPanel(QWidget):
             self._append_log(f"打开串口失败: {error}")
             return
 
+        self._start_receiver()
         self._open_port_button.setEnabled(False)
         self._close_port_button.setEnabled(True)
         self._append_log(f"串口已打开: {settings.port}")
 
     def _close_serial_port(self) -> None:
         opened_port = self._command_service.opened_port
+        self._stop_receiver()
         self._command_service.close_connection()
         self._open_port_button.setEnabled(True)
         self._close_port_button.setEnabled(False)
         if opened_port:
             self._append_log(f"串口已关闭: {opened_port}")
+
+    def _send_single_command(self) -> None:
+        command = self._single_command_input.text().strip()
+        if not command:
+            self._append_log("单条命令为空")
+            return
+
+        try:
+            results = self._command_service.send_with_opened_connection([command])
+        except Exception as error:  # noqa: BLE001
+            self._append_log(f"发送失败: {error}")
+            return
+
+        self._append_send_results(results)
 
     def _send_commands(self) -> None:
         commands = self._command_service.parse_commands(self._command_editor.toPlainText())
@@ -370,8 +396,30 @@ class SerialCommandPanel(QWidget):
             self._append_log(f"发送失败: {error}")
             return
 
-        self._next_command_index = 0
         self._append_send_results(results)
+
+    def _start_receiver(self) -> None:
+        self._stop_receiver()
+        self._receiver_thread = QThread(self)
+        self._receiver_worker = _SerialReceiverWorker(self._command_service)
+        self._receiver_worker.moveToThread(self._receiver_thread)
+        self._receiver_thread.started.connect(self._receiver_worker.run)
+        self._receiver_worker.received.connect(self._handle_received_data)
+        self._receiver_worker.finished.connect(self._receiver_thread.quit)
+        self._receiver_thread.start()
+
+    def _stop_receiver(self) -> None:
+        if self._receiver_worker:
+            self._receiver_worker.stop()
+        if self._receiver_thread:
+            self._receiver_thread.quit()
+            self._receiver_thread.wait()
+        self._receiver_worker = None
+        self._receiver_thread = None
+
+    @Slot(str)
+    def _handle_received_data(self, payload: str) -> None:
+        self._append_log(f"串口返回: {payload}")
 
     def _append_send_results(self, results: list[dict[str, str | bool]]) -> None:
         port = self._command_service.opened_port or "-"
@@ -379,7 +427,7 @@ class SerialCommandPanel(QWidget):
             status = "成功" if item["success"] else "失败"
             log_line = (
                 f"[{item['timestamp']}] 端口={port} 命令={item['command']} 状态={status} "
-                f"返回={item['response'] or '-'} 错误={item['error'] or '-'}"
+                f"错误={item['error'] or '-'}"
             )
             self._append_log(log_line)
 

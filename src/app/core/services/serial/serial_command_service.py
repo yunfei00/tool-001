@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 import json
+from threading import Lock
 
 from .serial_port_service import SerialPortService, SerialPortSettings
 
@@ -31,6 +32,7 @@ class SerialCommandService:
         self._serial_port_service = serial_port_service or SerialPortService()
         self._connection = None
         self._opened_settings: SerialPortSettings | None = None
+        self._io_lock = Lock()
 
     @staticmethod
     def default_commands_text() -> str:
@@ -157,12 +159,13 @@ class SerialCommandService:
         for command in commands:
             timestamp = datetime.now().isoformat(timespec="seconds")
             try:
-                response = self._serial_port_service.send_and_receive(self._connection, command)
+                with self._io_lock:
+                    self._serial_port_service.send_command(self._connection, command)
                 results.append(
                     SerialCommandResult(
                         command=command,
                         success=True,
-                        response=response,
+                        response="",
                         error="",
                         timestamp=timestamp,
                     )
@@ -178,3 +181,9 @@ class SerialCommandService:
                     )
                 )
         return [item.to_dict() for item in results]
+
+    def receive_with_opened_connection(self) -> str:
+        if not self.is_open or self._connection is None:
+            return ""
+        with self._io_lock:
+            return self._serial_port_service.read_available(self._connection)
