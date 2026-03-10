@@ -65,7 +65,7 @@ class SerialPortService:
 
     @staticmethod
     def normalize_response(raw_text: str) -> str:
-        return raw_text.replace("\r", "").replace("\n", "").strip()
+        return raw_text.replace("\r", "").replace("\n", "")
 
     def send_command(self, conn: serial.Serial, command: str) -> None:
         payload = f"{command.rstrip()}\r\n".encode("utf-8")
