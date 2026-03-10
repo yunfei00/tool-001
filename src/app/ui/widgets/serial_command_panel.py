@@ -6,6 +6,7 @@ from datetime import datetime
 
 from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QFileDialog,
     QFormLayout,
@@ -60,6 +61,9 @@ class SerialCommandPanel(QWidget):
 
         self._title = QGroupBox(title)
         self._adb_device_combo = QComboBox()
+        self._serial_port_inline_checkbox = QCheckBox("串口")
+        self._serial_port_inline_checkbox.setChecked(True)
+        self._serial_port_inline_checkbox.setEnabled(False)
         self._refresh_adb_button = QPushButton("扫描 ADB")
         self._adb_devices: list[str] = []
 
@@ -80,6 +84,7 @@ class SerialCommandPanel(QWidget):
         self._import_button = QPushButton("导入命令")
         self._export_button = QPushButton("导出命令")
         self._send_button = QPushButton("发送全部")
+        self._stop_tx_button = QPushButton("关闭发射")
 
         self._log_output = QTextEdit()
         self._log_output.setReadOnly(True)
@@ -107,13 +112,16 @@ class SerialCommandPanel(QWidget):
         self._port_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
         adb_row = QHBoxLayout()
+        adb_row.setContentsMargins(0, 0, 0, 0)
+        adb_row.addWidget(self._serial_port_inline_checkbox)
         adb_row.addWidget(self._adb_device_combo, 1)
         adb_row.addWidget(self._refresh_adb_button)
         form.addRow("设备序列号", self._with_layout_widget(adb_row))
 
         port_row = QHBoxLayout()
+        port_row.setContentsMargins(0, 0, 0, 0)
         port_row.addWidget(self._port_combo, 1)
-        form.addRow("串口", self._with_layout_widget(port_row))
+        form.addRow("", self._with_layout_widget(port_row))
 
         port_actions = QHBoxLayout()
         port_actions.addWidget(self._open_port_button)
@@ -132,6 +140,7 @@ class SerialCommandPanel(QWidget):
         command_actions.addWidget(self._import_button)
         command_actions.addWidget(self._export_button)
         command_actions.addWidget(self._send_button)
+        command_actions.addWidget(self._stop_tx_button)
         command_actions.addStretch(1)
         command_layout.addLayout(command_actions)
         command_layout.addWidget(self._command_editor)
@@ -165,6 +174,7 @@ class SerialCommandPanel(QWidget):
         self._close_port_button.clicked.connect(self._close_serial_port)
         self._single_send_button.clicked.connect(self._send_single_command)
         self._send_button.clicked.connect(self._send_commands)
+        self._stop_tx_button.clicked.connect(self._send_stop_transmit_commands)
         self._clear_log_button.clicked.connect(self._log_output.clear)
         self._device_watch_timer.timeout.connect(self._watch_device_topology)
         self._command_editor.textChanged.connect(self._save_command_editor_text)
@@ -405,6 +415,20 @@ class SerialCommandPanel(QWidget):
             results = self._command_service.send_with_opened_connection(commands, delay_seconds=0.2)
         except Exception as error:  # noqa: BLE001
             self._append_log(f"发送失败: {error}")
+            return
+
+        self._append_send_results(results)
+
+    def _send_stop_transmit_commands(self) -> None:
+        stop_commands = [
+            "AT+ERFTX=6,0,0",
+            'AT+EGMC=1,"NrAntSwAging",0',
+            "AT^WITX=0",
+        ]
+        try:
+            results = self._command_service.send_with_opened_connection(stop_commands, delay_seconds=0.2)
+        except Exception as error:  # noqa: BLE001
+            self._append_log(f"关闭发射失败: {error}")
             return
 
         self._append_send_results(results)
