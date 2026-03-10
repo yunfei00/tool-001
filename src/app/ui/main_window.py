@@ -146,8 +146,8 @@ class MainWindow(QMainWindow):
         self._auto_log_output = QTextEdit()
         self._auto_log_output.setReadOnly(True)
 
-        self._manual_serial_panel = SerialCommandPanel(title="串口 AT 调试(单步页面)")
-        self._auto_serial_panel = SerialCommandPanel(title="串口 AT 调试(自动化页面)")
+        self._manual_serial_panel = SerialCommandPanel(title="串口AT调试")
+        self._auto_serial_panel = SerialCommandPanel(title="串口AT调试")
 
         self._analysis_result_path = QLineEdit()
         self._analysis_result_path.setReadOnly(True)
