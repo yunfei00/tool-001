@@ -63,14 +63,27 @@ class SerialPortService:
             write_timeout=settings.timeout,
         )
 
-    def send_and_receive(self, conn: serial.Serial, command: str) -> str:
+    @staticmethod
+    def normalize_response(raw_text: str) -> str:
+        return raw_text.replace("\r", "").replace("\n", "").strip()
+
+    def send_command(self, conn: serial.Serial, command: str) -> None:
         payload = f"{command.rstrip()}\r\n".encode("utf-8")
         conn.write(payload)
         conn.flush()
+
+    def read_available(self, conn: serial.Serial) -> str:
+        raw = conn.read_all()
+        if not raw:
+            return ""
+        return self.normalize_response(raw.decode("utf-8", errors="replace"))
+
+    def send_and_receive(self, conn: serial.Serial, command: str) -> str:
+        self.send_command(conn, command)
         raw = conn.read_until(expected=b"OK\r\n")
         if not raw:
             raw = conn.read_all()
-        return raw.decode("utf-8", errors="replace").strip()
+        return self.normalize_response(raw.decode("utf-8", errors="replace"))
 
     @staticmethod
     def validate_settings(raw_settings: dict[str, Any]) -> SerialPortSettings:
