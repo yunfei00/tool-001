@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.core.services.serial.serial_command_service import SerialCommandService
+from app.core.services.serial.serial_binding_store import SerialBindingStore
 from app.core.services.serial.serial_port_service import SerialPortService
 from app.core.adb_device_service import AdbDeviceService
 
@@ -26,6 +27,8 @@ class SerialCommandPanel(QWidget):
         self._port_service = SerialPortService()
         self._command_service = SerialCommandService(self._port_service)
         self._adb_device_service = AdbDeviceService()
+        self._binding_store = SerialBindingStore()
+        self._serial_port_bindings = self._binding_store.load()
 
         self._title = QGroupBox(title)
         self._adb_device_combo = QComboBox()
@@ -118,7 +121,7 @@ class SerialCommandPanel(QWidget):
     def _bind_events(self) -> None:
         self._refresh_adb_button.clicked.connect(self._refresh_adb_devices)
         self._refresh_port_button.clicked.connect(self._refresh_ports)
-        self._adb_device_combo.currentIndexChanged.connect(self._refresh_ports)
+        self._adb_device_combo.currentIndexChanged.connect(self._on_adb_selection_changed)
         self._import_button.clicked.connect(self._import_commands)
         self._open_port_button.clicked.connect(self._open_serial_port)
         self._close_port_button.clicked.connect(self._close_serial_port)
@@ -175,30 +178,49 @@ class SerialCommandPanel(QWidget):
                 if (port["serial_number"] or "").strip() == target_serial
             ]
             if len(matched_ports) == 1:
-                self._bound_adb_serial = target_serial
+                self._save_binding(target_serial, matched_ports[0]["port"] or "")
                 self._append_binding_hint("已按序列号匹配 PCUI 串口")
             else:
                 matched_ports = []
 
-        if not matched_ports and len(self._adb_devices) == 1 and len(pcui_ports) == 1:
-            matched_ports = [pcui_ports[0]]
-            self._bound_adb_serial = self._adb_devices[0]
-            self._append_binding_hint("已自动绑定唯一设备与 PCUI 串口")
-        elif not matched_ports and (len(self._adb_devices) > 1 or len(pcui_ports) > 1):
-            self._append_binding_hint("检测到多台 USB 设备，请移除多余设备，仅保留一台后再绑定")
+        if not matched_ports and target_serial:
+            mapped_port = self._serial_port_bindings.get(target_serial, "")
+            if mapped_port:
+                matched_ports = [port for port in pcui_ports if (port["port"] or "") == mapped_port]
+                if len(matched_ports) == 1:
+                    self._save_binding(target_serial, mapped_port)
+                    self._append_binding_hint("已恢复保存的设备与 PCUI 串口绑定")
+                else:
+                    matched_ports = []
+
+        if not matched_ports and target_serial and pcui_ports:
+            occupied_ports = {
+                self._serial_port_bindings.get(serial, "")
+                for serial in self._adb_devices
+                if serial != target_serial
+            }
+            candidate_ports = [
+                port
+                for port in pcui_ports
+                if (port["port"] or "") not in occupied_ports
+            ]
+            selected_port = candidate_ports[0] if candidate_ports else pcui_ports[0]
+            matched_ports = [selected_port]
+            self._save_binding(target_serial, selected_port["port"] or "")
+            self._append_binding_hint("已自动绑定设备与 PCUI 串口")
 
         for port in matched_ports:
-            label = (
-                f"{port['port']} | {port['description'] or '-'} | {port['hwid'] or '-'}"
-                f" | SN:{port['serial_number'] or '-'}"
-            )
-            self._port_combo.addItem(label, port["port"])
+            self._port_combo.addItem(port["port"] or "", port["port"])
 
         if not matched_ports:
             self._append_log("未扫描到匹配的 PCUI 串口")
 
     def refresh_devices(self) -> None:
         self._refresh_adb_devices()
+        self._refresh_ports()
+
+    def _on_adb_selection_changed(self) -> None:
+        self._bound_adb_serial = None
         self._refresh_ports()
 
     def _watch_device_topology(self) -> None:
@@ -222,6 +244,18 @@ class SerialCommandPanel(QWidget):
             return
         self._last_binding_hint = message
         self._append_log(message)
+
+    def _save_binding(self, adb_serial: str, port_name: str) -> None:
+        serial = adb_serial.strip()
+        port = port_name.strip()
+        if not serial or not port:
+            return
+        self._bound_adb_serial = serial
+        previous = self._serial_port_bindings.get(serial)
+        if previous == port:
+            return
+        self._serial_port_bindings[serial] = port
+        self._binding_store.save(self._serial_port_bindings)
 
     def _import_commands(self) -> None:
         selected, _ = QFileDialog.getOpenFileName(
