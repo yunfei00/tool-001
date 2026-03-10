@@ -56,6 +56,7 @@ class SerialCommandPanel(QWidget):
         self._clear_log_button = QPushButton("清除日志")
 
         self._last_binding_hint = ""
+        self._bound_adb_serial: str | None = None
         self._last_device_snapshot: tuple[tuple[str, ...], tuple[str, ...]] | None = None
         self._device_watch_timer = QTimer(self)
         self._device_watch_timer.setInterval(2000)
@@ -162,18 +163,29 @@ class SerialCommandPanel(QWidget):
         ]
 
         matched_ports = []
-        if len(self._adb_devices) == 1 and len(pcui_ports) == 1:
-            matched_ports = [pcui_ports[0]]
-            self._append_binding_hint("已自动绑定唯一设备与 PCUI 串口")
-        elif len(self._adb_devices) > 1 or len(pcui_ports) > 1:
-            self._append_binding_hint("检测到多台 USB 设备，请移除多余设备，仅保留一台后再绑定")
-        elif selected_adb and selected_adb != "<no adb device>":
-            for port in pcui_ports:
-                serial_number = (port["serial_number"] or "").strip()
-                if serial_number and serial_number == selected_adb:
-                    matched_ports.append(port)
-            if matched_ports:
+        active_bound_serial = self._bound_adb_serial if self._bound_adb_serial in self._adb_devices else None
+        target_serial = active_bound_serial or (
+            selected_adb if selected_adb and selected_adb != "<no adb device>" else None
+        )
+
+        if target_serial:
+            matched_ports = [
+                port
+                for port in pcui_ports
+                if (port["serial_number"] or "").strip() == target_serial
+            ]
+            if len(matched_ports) == 1:
+                self._bound_adb_serial = target_serial
                 self._append_binding_hint("已按序列号匹配 PCUI 串口")
+            else:
+                matched_ports = []
+
+        if not matched_ports and len(self._adb_devices) == 1 and len(pcui_ports) == 1:
+            matched_ports = [pcui_ports[0]]
+            self._bound_adb_serial = self._adb_devices[0]
+            self._append_binding_hint("已自动绑定唯一设备与 PCUI 串口")
+        elif not matched_ports and (len(self._adb_devices) > 1 or len(pcui_ports) > 1):
+            self._append_binding_hint("检测到多台 USB 设备，请移除多余设备，仅保留一台后再绑定")
 
         for port in matched_ports:
             label = (
