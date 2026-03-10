@@ -11,7 +11,6 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
-    QLabel,
     QLineEdit,
     QPushButton,
     QSizePolicy,
@@ -22,6 +21,7 @@ from PySide6.QtWidgets import (
 
 from app.core.services.serial.serial_command_service import SerialCommandService
 from app.core.services.serial.serial_binding_store import SerialBindingStore
+from app.core.services.serial.serial_command_draft_store import SerialCommandDraftStore
 from app.core.services.serial.serial_port_service import SerialPortService
 from app.core.adb_device_service import AdbDeviceService
 
@@ -55,6 +55,7 @@ class SerialCommandPanel(QWidget):
         self._command_service = SerialCommandService(self._port_service)
         self._adb_device_service = AdbDeviceService()
         self._binding_store = SerialBindingStore()
+        self._draft_store = SerialCommandDraftStore()
         self._serial_port_bindings = self._binding_store.load()
 
         self._title = QGroupBox(title)
@@ -74,7 +75,7 @@ class SerialCommandPanel(QWidget):
 
         self._command_editor = QTextEdit()
         self._command_editor.setPlaceholderText("支持手工输入/导入，一行一条命令，空行自动忽略")
-        self._command_editor.setPlainText(self._command_service.default_commands_text())
+        self._command_editor.setPlainText(self._load_command_editor_text())
 
         self._import_button = QPushButton("导入命令")
         self._export_button = QPushButton("导出命令")
@@ -105,12 +106,14 @@ class SerialCommandPanel(QWidget):
         self._adb_device_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self._port_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
-        adb_port_row = QHBoxLayout()
-        adb_port_row.addWidget(self._adb_device_combo, 3)
-        adb_port_row.addWidget(QLabel("串口"))
-        adb_port_row.addWidget(self._port_combo, 3)
-        adb_port_row.addWidget(self._refresh_adb_button)
-        form.addRow("设备序列号", self._with_layout_widget(adb_port_row))
+        adb_row = QHBoxLayout()
+        adb_row.addWidget(self._adb_device_combo, 1)
+        adb_row.addWidget(self._refresh_adb_button)
+        form.addRow("设备序列号", self._with_layout_widget(adb_row))
+
+        port_row = QHBoxLayout()
+        port_row.addWidget(self._port_combo, 1)
+        form.addRow("串口", self._with_layout_widget(port_row))
 
         port_actions = QHBoxLayout()
         port_actions.addWidget(self._open_port_button)
@@ -164,6 +167,7 @@ class SerialCommandPanel(QWidget):
         self._send_button.clicked.connect(self._send_commands)
         self._clear_log_button.clicked.connect(self._log_output.clear)
         self._device_watch_timer.timeout.connect(self._watch_device_topology)
+        self._command_editor.textChanged.connect(self._save_command_editor_text)
 
     def _refresh_adb_devices(self, *, should_log: bool = True) -> None:
         devices, _ = self._adb_device_service.list_devices()
@@ -338,6 +342,14 @@ class SerialCommandPanel(QWidget):
 
         self._append_log(f"导出完成: {target}")
 
+
+    def _load_command_editor_text(self) -> str:
+        draft = self._draft_store.load()
+        return draft if draft.strip() else self._command_service.default_commands_text()
+
+    def _save_command_editor_text(self) -> None:
+        self._draft_store.save(self._command_editor.toPlainText())
+
     def _build_settings(self):
         port = self._port_combo.currentData()
         return self._port_service.validate_settings(
@@ -390,7 +402,7 @@ class SerialCommandPanel(QWidget):
             return
 
         try:
-            results = self._command_service.send_with_opened_connection(commands)
+            results = self._command_service.send_with_opened_connection(commands, delay_seconds=0.2)
         except Exception as error:  # noqa: BLE001
             self._append_log(f"发送失败: {error}")
             return

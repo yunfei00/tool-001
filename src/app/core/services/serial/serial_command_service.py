@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 import json
+import time
 from threading import Lock
 
 from .serial_port_service import SerialPortService, SerialPortSettings
@@ -149,14 +150,21 @@ class SerialCommandService:
                 self._connection = None
                 self._opened_settings = None
 
-    def send_with_opened_connection(self, commands: list[str]) -> list[dict[str, str | bool]]:
+    def send_with_opened_connection(
+        self,
+        commands: list[str],
+        *,
+        delay_seconds: float = 0.0,
+    ) -> list[dict[str, str | bool]]:
         if not commands:
             return []
         if not self.is_open or self._connection is None:
             raise RuntimeError("串口未打开，请先打开串口")
 
         results: list[SerialCommandResult] = []
-        for command in commands:
+        for index, command in enumerate(commands):
+            if index > 0 and delay_seconds > 0:
+                time.sleep(delay_seconds)
             timestamp = datetime.now().isoformat(timespec="seconds")
             try:
                 with self._io_lock:
