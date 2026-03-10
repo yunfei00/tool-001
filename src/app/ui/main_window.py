@@ -31,6 +31,7 @@ from PySide6.QtCore import QObject, QThread, Signal, QUrl
 from app.core.adb_device_service import AdbDeviceService
 from app.core.command_processor import CommandProcessor
 from app.core.config_manager import AppConfig, ConfigManager
+from app.ui.widgets.serial_command_panel import SerialCommandPanel
 
 
 class MainWindow(QMainWindow):
@@ -145,6 +146,9 @@ class MainWindow(QMainWindow):
         self._auto_log_output = QTextEdit()
         self._auto_log_output.setReadOnly(True)
 
+        self._manual_serial_panel = SerialCommandPanel(title="串口 AT 调试(单步页面)")
+        self._auto_serial_panel = SerialCommandPanel(title="串口 AT 调试(自动化页面)")
+
         self._analysis_result_path = QLineEdit()
         self._analysis_result_path.setReadOnly(True)
         self._analysis_browse_button = QPushButton("浏览")
@@ -243,6 +247,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(manual_group)
         layout.addLayout(config_actions_layout)
         layout.addWidget(command_group)
+        layout.addWidget(self._manual_serial_panel)
         layout.addWidget(log_group, stretch=1)
         tab.setLayout(layout)
         return tab
@@ -326,6 +331,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(auto_group)
         layout.addLayout(config_actions_layout)
         layout.addWidget(result_group)
+        layout.addWidget(self._auto_serial_panel)
         layout.addWidget(log_group, stretch=1)
         tab.setLayout(layout)
         return tab
