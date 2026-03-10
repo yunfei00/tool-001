@@ -242,13 +242,19 @@ class MainWindow(QMainWindow):
         log_layout.addWidget(self._log_output)
         log_group.setLayout(log_layout)
 
-        layout = QVBoxLayout()
-        layout.addWidget(notice_group)
-        layout.addWidget(manual_group)
-        layout.addLayout(config_actions_layout)
-        layout.addWidget(command_group)
-        layout.addWidget(self._manual_serial_panel)
-        layout.addWidget(log_group, stretch=1)
+        left_layout = QVBoxLayout()
+        left_layout.addWidget(notice_group)
+        left_layout.addWidget(manual_group)
+        left_layout.addLayout(config_actions_layout)
+        left_layout.addWidget(command_group)
+        left_layout.addWidget(log_group, stretch=1)
+
+        left_widget = QWidget()
+        left_widget.setLayout(left_layout)
+
+        layout = QHBoxLayout()
+        layout.addWidget(left_widget, stretch=2)
+        layout.addWidget(self._manual_serial_panel, stretch=1)
         tab.setLayout(layout)
         return tab
 
@@ -327,12 +333,18 @@ class MainWindow(QMainWindow):
         log_layout.addWidget(self._auto_log_output)
         log_group.setLayout(log_layout)
 
-        layout = QVBoxLayout()
-        layout.addWidget(auto_group)
-        layout.addLayout(config_actions_layout)
-        layout.addWidget(result_group)
-        layout.addWidget(self._auto_serial_panel)
-        layout.addWidget(log_group, stretch=1)
+        left_layout = QVBoxLayout()
+        left_layout.addWidget(auto_group)
+        left_layout.addLayout(config_actions_layout)
+        left_layout.addWidget(result_group)
+        left_layout.addWidget(log_group, stretch=1)
+
+        left_widget = QWidget()
+        left_widget.setLayout(left_layout)
+
+        layout = QHBoxLayout()
+        layout.addWidget(left_widget, stretch=2)
+        layout.addWidget(self._auto_serial_panel, stretch=1)
         tab.setLayout(layout)
         return tab
 
@@ -524,6 +536,8 @@ class MainWindow(QMainWindow):
 
     def scan_adb_devices(self) -> None:
         self._refresh_adb_devices(should_log=True)
+        self._manual_serial_panel.refresh_devices()
+        self._auto_serial_panel.refresh_devices()
 
     def _update_mode_dependent_fields(self) -> None:
         source = self.sender()
