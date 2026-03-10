@@ -418,7 +418,10 @@ class SerialCommandPanel(QWidget):
 
     @Slot(str)
     def _handle_received_data(self, payload: str) -> None:
-        self._append_log(f"返回命令: {payload}")
+        normalized_payload = self._normalize_serial_payload(payload)
+        if not normalized_payload:
+            return
+        self._append_log(f"返回命令: {normalized_payload}")
 
     def _append_send_results(self, results: list[dict[str, str | bool]]) -> None:
         for item in results:
@@ -428,9 +431,15 @@ class SerialCommandPanel(QWidget):
             self._append_log(log_line)
 
     def _append_log(self, message: str) -> None:
-        timestamp = datetime.now().strftime("%H:%M:%S")
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
         lines = message.splitlines() or [""]
         self._log_output.append("\n".join(f"[{timestamp}] {line}" for line in lines))
+
+    @staticmethod
+    def _normalize_serial_payload(payload: str) -> str:
+        sanitized = payload.replace("\0", "")
+        normalized = "\n".join(segment for segment in sanitized.splitlines() if segment.strip())
+        return normalized.strip()
 
     @staticmethod
     def _with_layout_widget(layout: QHBoxLayout) -> QWidget:
