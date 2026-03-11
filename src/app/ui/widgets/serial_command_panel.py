@@ -48,6 +48,41 @@ class _SerialReceiverWorker(QObject):
         self._running = False
 
 
+class _SerialSenderWorker(QObject):
+    finished = Signal(list)
+
+    def __init__(
+        self,
+        command_service: SerialCommandService,
+        commands: list[str],
+        delay_seconds: float,
+    ) -> None:
+        super().__init__()
+        self._command_service = command_service
+        self._commands = commands
+        self._delay_seconds = delay_seconds
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            results = self._command_service.send_with_opened_connection(
+                self._commands,
+                delay_seconds=self._delay_seconds,
+            )
+        except Exception as error:  # noqa: BLE001
+            results = [
+                {
+                    "command": command,
+                    "success": False,
+                    "response": "",
+                    "error": str(error),
+                    "timestamp": "",
+                }
+                for command in self._commands
+            ]
+        self.finished.emit(results)
+
+
 class SerialCommandPanel(QWidget):
     def __init__(self, title: str = "通用串口 AT 命令") -> None:
         super().__init__()
@@ -95,6 +130,8 @@ class SerialCommandPanel(QWidget):
 
         self._receiver_thread: QThread | None = None
         self._receiver_worker: _SerialReceiverWorker | None = None
+        self._sender_thread: QThread | None = None
+        self._sender_worker: _SerialSenderWorker | None = None
 
         self._build_ui()
         self._bind_events()
@@ -393,13 +430,7 @@ class SerialCommandPanel(QWidget):
             self._append_log("单条命令为空")
             return
 
-        try:
-            results = self._command_service.send_with_opened_connection([command])
-        except Exception as error:  # noqa: BLE001
-            self._append_log(f"发送失败: {error}")
-            return
-
-        self._append_send_results(results)
+        self._dispatch_send_commands([command], delay_seconds=0.0)
 
     def _send_commands(self) -> None:
         commands = self._command_service.parse_commands(self._command_editor.toPlainText())
@@ -407,13 +438,7 @@ class SerialCommandPanel(QWidget):
             self._append_log("没有可发送的命令")
             return
 
-        try:
-            results = self._command_service.send_with_opened_connection(commands, delay_seconds=0.2)
-        except Exception as error:  # noqa: BLE001
-            self._append_log(f"发送失败: {error}")
-            return
-
-        self._append_send_results(results)
+        self._dispatch_send_commands(commands, delay_seconds=0.2)
 
     def _send_stop_transmit_commands(self) -> None:
         stop_commands = [
@@ -421,13 +446,31 @@ class SerialCommandPanel(QWidget):
             'AT+EGMC=1,"NrAntSwAging",0',
             "AT^WITX=0",
         ]
-        try:
-            results = self._command_service.send_with_opened_connection(stop_commands, delay_seconds=0.2)
-        except Exception as error:  # noqa: BLE001
-            self._append_log(f"关闭发射失败: {error}")
+        self._dispatch_send_commands(stop_commands, delay_seconds=0.2)
+
+    def _dispatch_send_commands(self, commands: list[str], *, delay_seconds: float) -> None:
+        if self._sender_thread is not None:
+            self._append_log("串口发送进行中，请稍候")
             return
 
-        self._append_send_results(results)
+        try:
+            self._sender_thread = QThread(self)
+            self._sender_worker = _SerialSenderWorker(
+                self._command_service,
+                commands,
+                delay_seconds,
+            )
+            self._sender_worker.moveToThread(self._sender_thread)
+            self._sender_thread.started.connect(self._sender_worker.run)
+            self._sender_worker.finished.connect(self._on_send_worker_finished)
+            self._sender_worker.finished.connect(self._sender_thread.quit)
+            self._sender_thread.finished.connect(self._cleanup_sender_worker)
+            self._set_send_buttons_enabled(False)
+            self._sender_thread.start()
+        except Exception as error:  # noqa: BLE001
+            self._append_log(f"发送失败: {error}")
+            self._cleanup_sender_worker()
+            self._set_send_buttons_enabled(True)
 
     def _start_receiver(self) -> None:
         self._stop_receiver()
@@ -447,6 +490,21 @@ class SerialCommandPanel(QWidget):
             self._receiver_thread.wait()
         self._receiver_worker = None
         self._receiver_thread = None
+
+    @Slot(list)
+    def _on_send_worker_finished(self, results: list[dict[str, str | bool]]) -> None:
+        self._append_send_results(results)
+        self._set_send_buttons_enabled(True)
+
+    @Slot()
+    def _cleanup_sender_worker(self) -> None:
+        self._sender_worker = None
+        self._sender_thread = None
+
+    def _set_send_buttons_enabled(self, enabled: bool) -> None:
+        self._single_send_button.setEnabled(enabled)
+        self._send_button.setEnabled(enabled)
+        self._stop_tx_button.setEnabled(enabled)
 
     @Slot(str)
     def _handle_received_data(self, payload: str) -> None:
