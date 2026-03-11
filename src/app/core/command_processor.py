@@ -43,6 +43,7 @@ class CommandProcessor:
     _SENTEST_REMOTE_PATH = "/data/local/tmp/sentest_v4l2"
     _ADB_SHORT_TIMEOUT_SECONDS = 10
     _ADB_STOP_TIMEOUT_SECONDS = 5
+    _DEVICE_RECOVERY_POLL_SECONDS = 30
     _STREAM_CHECK_TOKEN = "__STREAM_RUNNING__"
 
     def __init__(self) -> None:
@@ -214,13 +215,108 @@ class CommandProcessor:
         )
         return result.returncode == 0 and self._STREAM_CHECK_TOKEN in (result.stdout or "")
 
-    def _ensure_stream_for_config(self, config: AppConfig) -> bool:
+    def _is_device_online(self, *, adb_device: str) -> bool:
+        result = subprocess.run(
+            ["adb", "-s", adb_device, "get-state"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=self._ADB_SHORT_TIMEOUT_SECONDS,
+        )
+        return result.returncode == 0 and (result.stdout or "").strip() == "device"
+
+    @staticmethod
+    def _looks_like_device_disconnect(message: str) -> bool:
+        lowered = message.lower()
+        markers = (
+            "device offline",
+            "device not found",
+            "no devices/emulators found",
+            "no device",
+            "closed",
+            "disconnected",
+        )
+        return any(marker in lowered for marker in markers)
+
+    def _wait_for_device_online(
+        self,
+        *,
+        adb_device: str,
+        progress_callback: Callable[[str], None] | None = None,
+        should_stop_callback: Callable[[], bool] | None = None,
+        detail_log: TextIO | None = None,
+    ) -> bool:
+        waited = False
+        while True:
+            if self._should_stop(should_stop_callback):
+                if detail_log is not None:
+                    detail_log.write("收到停止请求，结束设备恢复等待。\n")
+                return False
+            if self._is_device_online(adb_device=adb_device):
+                if waited:
+                    message = "检测到设备已恢复在线，继续执行自动化任务。"
+                    self._emit_progress(progress_callback, message)
+                    if detail_log is not None:
+                        detail_log.write(f"{message}\n")
+                return True
+            waited = True
+            message = (
+                "检测到设备不在线（可能 USB 掉线或设备重启），"
+                f"将在 {self._DEVICE_RECOVERY_POLL_SECONDS} 秒后继续检测。"
+            )
+            self._emit_progress(progress_callback, message)
+            if detail_log is not None:
+                detail_log.write(f"{message}\n")
+            time.sleep(self._DEVICE_RECOVERY_POLL_SECONDS)
+
+    def _send_with_device_recovery(
+        self,
+        *,
+        command: str,
+        config: AppConfig,
+        progress_callback: Callable[[str], None] | None,
+        should_stop_callback: Callable[[], bool] | None,
+        detail_log: TextIO,
+    ) -> tuple[str, bool]:
+        adb_device = config.adb_device
+        if not adb_device:
+            return "No adb device selected.", False
+        while True:
+            if not self._wait_for_device_online(
+                adb_device=adb_device,
+                progress_callback=progress_callback,
+                should_stop_callback=should_stop_callback,
+                detail_log=detail_log,
+            ):
+                return "", True
+            result = self.send(command, config, start_stream=False)
+            if not self._looks_like_device_disconnect(result):
+                return result, False
+            message = "命令执行期间检测到设备掉线，进入等待恢复流程。"
+            self._emit_progress(progress_callback, message)
+            detail_log.write(f"{message}\n")
+
+    def _ensure_stream_for_config(
+        self,
+        config: AppConfig,
+        *,
+        progress_callback: Callable[[str], None] | None = None,
+        should_stop_callback: Callable[[], bool] | None = None,
+        detail_log: TextIO | None = None,
+    ) -> bool:
         """Ensure stream is running for automation; return True when stream was restarted."""
         if config.auto_manual_stream:
             return False
         adb_device = config.adb_device
         if not adb_device:
             raise RuntimeError("No adb device selected.")
+        if not self._wait_for_device_online(
+            adb_device=adb_device,
+            progress_callback=progress_callback,
+            should_stop_callback=should_stop_callback,
+            detail_log=detail_log,
+        ):
+            raise RuntimeError("Device recovery wait interrupted by stop request.")
         if self._is_remote_stream_running(adb_device=adb_device):
             return False
         sensor_mode = config.sensor_mode[0] if config.sensor_mode else 0
@@ -382,14 +478,27 @@ class CommandProcessor:
             index = 0
             for sensor_idx, sensor_mode in targets:
                 run_config = self._config_with_target(config, sensor_idx=sensor_idx, sensor_mode=sensor_mode)
-                self._start_stream_for_config(run_config)
+                if not self._start_stream_for_config(
+                    run_config,
+                    progress_callback=progress_callback,
+                    should_stop_callback=should_stop_callback,
+                    detail_log=detail_log,
+                ):
+                    self._emit_progress(progress_callback, "收到停止请求，终止当前自动化任务。")
+                    detail_log.write("收到停止请求，终止当前自动化任务。\n")
+                    return total_elapsed
                 applied_value: int | None = None
                 for value in values:
                     if self._should_stop(should_stop_callback):
                         self._emit_progress(progress_callback, "收到停止请求，终止当前自动化任务。")
                         detail_log.write("收到停止请求，终止当前自动化任务。\n")
                         return total_elapsed
-                    if self._ensure_stream_for_config(run_config):
+                    if self._ensure_stream_for_config(
+                        run_config,
+                        progress_callback=progress_callback,
+                        should_stop_callback=should_stop_callback,
+                        detail_log=detail_log,
+                    ):
                         applied_value = None
                         detail_log.write("检测到流未运行，已重新起流并将重新发送命令。\n")
                     index += 1
@@ -403,7 +512,17 @@ class CommandProcessor:
                         continue
                     run_config = self._config_with_step_value(run_config, step, value)
                     start_ts = time.perf_counter()
-                    result = self.send(step, run_config, start_stream=False)
+                    result, was_stopped = self._send_with_device_recovery(
+                        command=step,
+                        config=run_config,
+                        progress_callback=progress_callback,
+                        should_stop_callback=should_stop_callback,
+                        detail_log=detail_log,
+                    )
+                    if was_stopped:
+                        self._emit_progress(progress_callback, "收到停止请求，终止当前自动化任务。")
+                        detail_log.write("收到停止请求，终止当前自动化任务。\n")
+                        return total_elapsed
                     elapsed = time.perf_counter() - start_ts
                     total_elapsed += elapsed
                     detail_log.write(f"执行完成 step={step} value={value} 用时={elapsed:.3f}s\n{result}\n\n")
@@ -442,14 +561,27 @@ class CommandProcessor:
                 round_case_index = 0
                 for sensor_idx, sensor_mode in targets:
                     run_config = self._config_with_target(config, sensor_idx=sensor_idx, sensor_mode=sensor_mode)
-                    self._start_stream_for_config(run_config)
+                    if not self._start_stream_for_config(
+                        run_config,
+                        progress_callback=progress_callback,
+                        should_stop_callback=should_stop_callback,
+                        detail_log=detail_log,
+                    ):
+                        self._emit_progress(progress_callback, "收到停止请求，终止当前自动化任务。")
+                        detail_log.write("收到停止请求，终止当前自动化任务。\n")
+                        return count, total_elapsed
                     applied_values: dict[str, int] = {}
                     for values in product(*candidates):
                         if self._should_stop(should_stop_callback):
                             self._emit_progress(progress_callback, "收到停止请求，终止当前自动化任务。")
                             detail_log.write("收到停止请求，终止当前自动化任务。\n")
                             return count, total_elapsed
-                        if self._ensure_stream_for_config(run_config):
+                        if self._ensure_stream_for_config(
+                            run_config,
+                            progress_callback=progress_callback,
+                            should_stop_callback=should_stop_callback,
+                            detail_log=detail_log,
+                        ):
                             applied_values = {}
                             detail_log.write("检测到流未运行，已重新起流并将重新发送全部步骤命令。\n")
                         index += 1
@@ -474,7 +606,17 @@ class CommandProcessor:
                                 continue
                             run_config = self._config_with_step_value(run_config, step, value)
                             start_ts = time.perf_counter()
-                            final_result = self.send(step, run_config, start_stream=False)
+                            final_result, was_stopped = self._send_with_device_recovery(
+                                command=step,
+                                config=run_config,
+                                progress_callback=progress_callback,
+                                should_stop_callback=should_stop_callback,
+                                detail_log=detail_log,
+                            )
+                            if was_stopped:
+                                self._emit_progress(progress_callback, "收到停止请求，终止当前自动化任务。")
+                                detail_log.write("收到停止请求，终止当前自动化任务。\n")
+                                return count, total_elapsed
                             elapsed = time.perf_counter() - start_ts
                             total_elapsed += elapsed
                             detail_log.write(f"子步骤完成 step={step} value={value} 用时={elapsed:.3f}s\n{final_result}\n")
@@ -501,15 +643,35 @@ class CommandProcessor:
             return "X"
         return "P"
 
-    def _start_stream_for_config(self, config: AppConfig) -> None:
+    def _start_stream_for_config(
+        self,
+        config: AppConfig,
+        *,
+        progress_callback: Callable[[str], None] | None = None,
+        should_stop_callback: Callable[[], bool] | None = None,
+        detail_log: TextIO | None = None,
+    ) -> bool:
         adb_device = config.adb_device
         if not adb_device:
             raise RuntimeError("No adb device selected.")
+        if not self._wait_for_device_online(
+            adb_device=adb_device,
+            progress_callback=progress_callback,
+            should_stop_callback=should_stop_callback,
+            detail_log=detail_log,
+        ):
+            return False
         if config.auto_manual_stream:
             if self._is_remote_stream_running(adb_device=adb_device):
                 self._stop_stream(adb_device=adb_device)
-            return
-        self._ensure_stream_for_config(config)
+            return True
+        self._ensure_stream_for_config(
+            config,
+            progress_callback=progress_callback,
+            should_stop_callback=should_stop_callback,
+            detail_log=detail_log,
+        )
+        return True
 
 
     @staticmethod
