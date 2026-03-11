@@ -132,6 +132,7 @@ class MainWindow(QMainWindow):
         self._clear_log_button = QPushButton("Clear Logs")
         self._start_stream_debug_button = QPushButton("起流调试")
         self._stop_stream_debug_button = QPushButton("停止流")
+        self._read_current_params_button = QPushButton("读取当前参数")
 
         self._auto_clear_log_button = QPushButton("Clear Logs")
         self._auto_load_button = QPushButton("Load Config")
@@ -218,6 +219,7 @@ class MainWindow(QMainWindow):
         manual_form.addRow("EQ dg1 enable", self._with_step_send(self._eq_dg1_enable, "eq dg1 enable"))
         manual_form.addRow("EQ sr1", self._with_step_send(self._eq_sr1, "eq sr1", range_text="范围: 0~15"))
         manual_form.addRow("EQ bw", self._with_step_send(self._eq_bw, "eq bw"))
+        manual_form.addRow("", self._read_current_params_button)
         manual_group.setLayout(manual_form)
 
         config_actions_layout = QHBoxLayout()
@@ -388,6 +390,7 @@ class MainWindow(QMainWindow):
         self._command_input.returnPressed.connect(self.send_manual_command)
         self._scan_adb_button.clicked.connect(self.scan_adb_devices)
         self._clear_log_button.clicked.connect(self.clear_manual_logs)
+        self._read_current_params_button.clicked.connect(self.read_current_parameters)
         self._start_stream_debug_button.clicked.connect(self.start_stream_debug)
         self._stop_stream_debug_button.clicked.connect(self.stop_stream_debug)
 
@@ -679,6 +682,26 @@ class MainWindow(QMainWindow):
         response = self._command_processor.send(command, self._collect_manual_config())
         self._append_manual_log(response)
         self._command_input.clear()
+
+    def read_current_parameters(self) -> None:
+        if not self._selected_manual_adb_device():
+            self._append_manual_log("No adb device selected. Please scan and choose one device first.")
+            return
+
+        read_commands = (
+            "GET_CDR_DELAY",
+            "GET_EQ_OFFSET",
+            "GET_EQ_DG0_EN",
+            "GET_EQ_SR0",
+            "GET_EQ_DG1_EN",
+            "GET_EQ_SR1",
+            "GET_EQ_BW",
+        )
+        config = self._collect_manual_config()
+        self._append_manual_log("开始读取当前参数...")
+        for command in read_commands:
+            response = self._command_processor.send(command, config)
+            self._append_manual_log(response)
 
     def start_stream_debug(self) -> None:
         if not self._selected_manual_adb_device():
