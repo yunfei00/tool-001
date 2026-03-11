@@ -32,14 +32,25 @@ jobs:
         run: |
           pyinstaller src/app/main.py --name tool-001 --onefile --paths src
 
+      - name: Generate build metadata
+        shell: bash
+        run: |
+          cd dist
+          sha256sum tool-001.exe > tool-001.exe.sha256
+
       - name: Upload workflow artifact (EXE)
         uses: actions/upload-artifact@v4
         with:
-          name: tool-001-windows-exe
-          path: dist/tool-001.exe
+          name: tool-001-windows-build
+          path: |
+            dist/tool-001.exe
+            dist/tool-001.exe.sha256
 
       - name: Publish release asset (EXE)
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/tool-001.exe
+          generate_release_notes: true
+          files: |
+            dist/tool-001.exe
+            dist/tool-001.exe.sha256

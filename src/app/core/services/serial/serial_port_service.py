@@ -73,7 +73,10 @@ class SerialPortService:
         conn.flush()
 
     def read_available(self, conn: serial.Serial) -> str:
-        raw = conn.read_all()
+        waiting = getattr(conn, "in_waiting", 0)
+        if waiting <= 0:
+            return ""
+        raw = conn.read(waiting)
         if not raw:
             return ""
         return self.normalize_response(raw.decode("utf-8", errors="replace"))
