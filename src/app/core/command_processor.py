@@ -196,13 +196,22 @@ class CommandProcessor:
 
 
     def _is_remote_stream_running(self, *, adb_device: str) -> bool:
+        for target, process in list(self._stream_processes.items()):
+            target_device, _, _ = target
+            if process.poll() is not None:
+                self._stream_processes.pop(target, None)
+                continue
+            if target_device == adb_device:
+                return True
+
         check_cmd = [
             "adb",
             "-s",
             adb_device,
             "shell",
             (
-                "if ps -ef | grep -E '[s]entest_v4l2|[v]entest_4l2' >/dev/null; "
+                "if pidof sentest_v4l2 >/dev/null 2>&1 "
+                "|| ps | grep -E '[s]entest_v4l2' >/dev/null 2>&1; "
                 f"then echo {self._STREAM_CHECK_TOKEN}; fi"
             ),
         ]
@@ -213,7 +222,7 @@ class CommandProcessor:
             text=True,
             timeout=self._ADB_SHORT_TIMEOUT_SECONDS,
         )
-        return result.returncode == 0 and self._STREAM_CHECK_TOKEN in (result.stdout or "")
+        return self._STREAM_CHECK_TOKEN in (result.stdout or "")
 
     def _is_device_online(self, *, adb_device: str) -> bool:
         result = subprocess.run(
