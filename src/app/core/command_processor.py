@@ -292,6 +292,7 @@ class CommandProcessor:
             return "No adb device selected.", False, False
         had_recovery = False
         while True:
+            was_online_before_wait = self._is_device_online(adb_device=adb_device)
             if not self._wait_for_device_online(
                 adb_device=adb_device,
                 progress_callback=progress_callback,
@@ -299,9 +300,11 @@ class CommandProcessor:
                 detail_log=detail_log,
             ):
                 return "", True, had_recovery
-            if had_recovery and not config.auto_manual_stream:
+            if not was_online_before_wait:
+                had_recovery = True
+            if had_recovery:
                 self._restart_stream_for_config(config)
-                message = "设备重连后已停止旧流并重新起流。"
+                message = "设备重连后已重置全部流状态并重新起流。"
                 self._emit_progress(progress_callback, message)
                 detail_log.write(f"{message}\n")
             result = self.send(command, config, start_stream=False)
@@ -317,8 +320,20 @@ class CommandProcessor:
         if not adb_device:
             raise RuntimeError("No adb device selected.")
         sensor_mode = config.sensor_mode[0] if config.sensor_mode else 0
-        self._stop_stream(adb_device=adb_device)
+        self._reset_all_stream_state(adb_device=adb_device)
         self._start_stream(adb_device=adb_device, sensor_idx=config.sensor_idx, sensor_mode=sensor_mode)
+
+    def _reset_all_stream_state(self, *, adb_device: str) -> None:
+        """Reset stream runtime state to startup-like clean state."""
+        tracked_devices = {target_device for target_device, _, _ in self._stream_processes}
+        tracked_devices.add(adb_device)
+        for target_device in tracked_devices:
+            try:
+                self._stop_stream(adb_device=target_device)
+            except Exception:  # noqa: BLE001
+                # Recovery should continue even if a stale stream cannot be stopped cleanly.
+                continue
+        self._stream_processes.clear()
 
     def _ensure_stream_for_config(
         self,
