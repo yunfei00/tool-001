@@ -43,7 +43,8 @@ class CommandProcessor:
     _SENTEST_REMOTE_PATH = "/data/local/tmp/sentest_v4l2"
     _ADB_SHORT_TIMEOUT_SECONDS = 10
     _ADB_STOP_TIMEOUT_SECONDS = 5
-    _DEVICE_RECOVERY_POLL_SECONDS = 30
+    _DEVICE_RECOVERY_POLL_SECONDS = 1
+    _DEVICE_OFFLINE_RESET_SECONDS = 10
     _STREAM_CHECK_TOKEN = "__STREAM_RUNNING__"
 
     def __init__(self) -> None:
@@ -254,8 +255,11 @@ class CommandProcessor:
         progress_callback: Callable[[str], None] | None = None,
         should_stop_callback: Callable[[], bool] | None = None,
         detail_log: TextIO | None = None,
+        clear_streams_when_offline_too_long: bool = False,
     ) -> bool:
         waited = False
+        offline_since: float | None = None
+        has_cleared_streams = False
         while True:
             if self._should_stop(should_stop_callback):
                 if detail_log is not None:
@@ -269,6 +273,23 @@ class CommandProcessor:
                         detail_log.write(f"{message}\n")
                 return True
             waited = True
+            if offline_since is None:
+                offline_since = time.monotonic()
+            offline_elapsed = time.monotonic() - offline_since
+            if (
+                clear_streams_when_offline_too_long
+                and not has_cleared_streams
+                and offline_elapsed >= self._DEVICE_OFFLINE_RESET_SECONDS
+            ):
+                message = (
+                    f"设备离线已超过 {self._DEVICE_OFFLINE_RESET_SECONDS} 秒，"
+                    "立刻清除所有已打开流并等待设备重连。"
+                )
+                self._emit_progress(progress_callback, message)
+                if detail_log is not None:
+                    detail_log.write(f"{message}\n")
+                self._reset_all_stream_state(adb_device=adb_device)
+                has_cleared_streams = True
             message = (
                 "检测到设备不在线（可能 USB 掉线或设备重启），"
                 f"将在 {self._DEVICE_RECOVERY_POLL_SECONDS} 秒后继续检测。"
@@ -298,6 +319,7 @@ class CommandProcessor:
                 progress_callback=progress_callback,
                 should_stop_callback=should_stop_callback,
                 detail_log=detail_log,
+                clear_streams_when_offline_too_long=True,
             ):
                 return "", True, had_recovery
             if not was_online_before_wait:
@@ -354,6 +376,7 @@ class CommandProcessor:
             progress_callback=progress_callback,
             should_stop_callback=should_stop_callback,
             detail_log=detail_log,
+            clear_streams_when_offline_too_long=True,
         ):
             raise RuntimeError("Device recovery wait interrupted by stop request.")
         if self._is_remote_stream_running(adb_device=adb_device):
@@ -709,6 +732,7 @@ class CommandProcessor:
             progress_callback=progress_callback,
             should_stop_callback=should_stop_callback,
             detail_log=detail_log,
+            clear_streams_when_offline_too_long=True,
         ):
             return False
         if config.auto_manual_stream:
