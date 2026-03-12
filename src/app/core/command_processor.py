@@ -299,6 +299,11 @@ class CommandProcessor:
                 detail_log=detail_log,
             ):
                 return "", True, had_recovery
+            if had_recovery and not config.auto_manual_stream:
+                self._restart_stream_for_config(config)
+                message = "设备重连后已停止旧流并重新起流。"
+                self._emit_progress(progress_callback, message)
+                detail_log.write(f"{message}\n")
             result = self.send(command, config, start_stream=False)
             if not self._looks_like_device_disconnect(result):
                 return result, False, had_recovery
@@ -306,6 +311,14 @@ class CommandProcessor:
             message = "命令执行期间检测到设备掉线，进入等待恢复流程。"
             self._emit_progress(progress_callback, message)
             detail_log.write(f"{message}\n")
+
+    def _restart_stream_for_config(self, config: AppConfig) -> None:
+        adb_device = config.adb_device
+        if not adb_device:
+            raise RuntimeError("No adb device selected.")
+        sensor_mode = config.sensor_mode[0] if config.sensor_mode else 0
+        self._stop_stream(adb_device=adb_device)
+        self._start_stream(adb_device=adb_device, sensor_idx=config.sensor_idx, sensor_mode=sensor_mode)
 
     def _ensure_stream_for_config(
         self,
@@ -335,7 +348,6 @@ class CommandProcessor:
         return True
 
     def _stop_stream(self, *, adb_device: str) -> None:
-        stopped_any = False
         for target, process in list(self._stream_processes.items()):
             target_device, _, _ = target
             if target_device != adb_device:
@@ -348,17 +360,13 @@ class CommandProcessor:
                     process.stdin.write("\n")
                     process.stdin.flush()
                 process.wait(timeout=self._ADB_STOP_TIMEOUT_SECONDS)
-                stopped_any = True
             except Exception:  # noqa: BLE001
                 process.terminate()
                 process.wait(timeout=self._ADB_STOP_TIMEOUT_SECONDS)
             finally:
                 self._stream_processes.pop(target, None)
 
-        if stopped_any:
-            return
-
-        # Fallback for stale stream processes started outside current instance.
+        # Always clean up stale stream processes on device in case previous runs exited abnormally.
         subprocess.run(
             ["adb", "-s", adb_device, "shell", f"pkill -f {self._SENTEST_REMOTE_PATH}"],
             check=False,
@@ -610,34 +618,44 @@ class CommandProcessor:
                             f"global_index={index} sensor idx={sensor_idx}, sensor mode={sensor_mode}, {progress_detail}\n"
                         )
                         final_result = ""
-                        for step, value in zip(steps, values):
+                        while True:
+                            restart_all_steps = False
+                            for step, value in zip(steps, values):
+                                if self._should_stop(should_stop_callback):
+                                    self._emit_progress(progress_callback, "收到停止请求，终止当前自动化任务。")
+                                    detail_log.write("收到停止请求，终止当前自动化任务。\n")
+                                    return count, total_elapsed
+                                if applied_values.get(step) == value:
+                                    detail_log.write(f"跳过未变化参数 step={step} value={value}\n")
+                                    continue
+                                run_config = self._config_with_step_value(run_config, step, value)
+                                start_ts = time.perf_counter()
+                                final_result, was_stopped, had_recovery = self._send_with_device_recovery(
+                                    command=step,
+                                    config=run_config,
+                                    progress_callback=progress_callback,
+                                    should_stop_callback=should_stop_callback,
+                                    detail_log=detail_log,
+                                )
+                                if was_stopped:
+                                    self._emit_progress(progress_callback, "收到停止请求，终止当前自动化任务。")
+                                    detail_log.write("收到停止请求，终止当前自动化任务。\n")
+                                    return count, total_elapsed
+                                elapsed = time.perf_counter() - start_ts
+                                total_elapsed += elapsed
+                                detail_log.write(f"子步骤完成 step={step} value={value} 用时={elapsed:.3f}s\n{final_result}\n")
+                                if had_recovery:
+                                    applied_values = {}
+                                    restart_all_steps = True
+                                    detail_log.write("设备重连后已重启流，当前组合将从第一步重新下发全部参数。\n")
+                                    break
+                                applied_values[step] = value
+                            if not restart_all_steps:
+                                break
                             if self._should_stop(should_stop_callback):
                                 self._emit_progress(progress_callback, "收到停止请求，终止当前自动化任务。")
                                 detail_log.write("收到停止请求，终止当前自动化任务。\n")
                                 return count, total_elapsed
-                            if applied_values.get(step) == value:
-                                detail_log.write(f"跳过未变化参数 step={step} value={value}\n")
-                                continue
-                            run_config = self._config_with_step_value(run_config, step, value)
-                            start_ts = time.perf_counter()
-                            final_result, was_stopped, had_recovery = self._send_with_device_recovery(
-                                command=step,
-                                config=run_config,
-                                progress_callback=progress_callback,
-                                should_stop_callback=should_stop_callback,
-                                detail_log=detail_log,
-                            )
-                            if was_stopped:
-                                self._emit_progress(progress_callback, "收到停止请求，终止当前自动化任务。")
-                                detail_log.write("收到停止请求，终止当前自动化任务。\n")
-                                return count, total_elapsed
-                            elapsed = time.perf_counter() - start_ts
-                            total_elapsed += elapsed
-                            detail_log.write(f"子步骤完成 step={step} value={value} 用时={elapsed:.3f}s\n{final_result}\n")
-                            if had_recovery:
-                                applied_values = {}
-                                detail_log.write("设备重连后，重置本轮已应用参数缓存，后续参数将全部重新发送。\n")
-                            applied_values[step] = value
                         detail_log.write("\n")
                         writer.writerow([round_index, sensor_idx, sensor_mode, *values, self._result_symbol(final_result)])
                         self._flush_file(handle)
