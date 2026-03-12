@@ -286,10 +286,11 @@ class CommandProcessor:
         progress_callback: Callable[[str], None] | None,
         should_stop_callback: Callable[[], bool] | None,
         detail_log: TextIO,
-    ) -> tuple[str, bool]:
+    ) -> tuple[str, bool, bool]:
         adb_device = config.adb_device
         if not adb_device:
-            return "No adb device selected.", False
+            return "No adb device selected.", False, False
+        had_recovery = False
         while True:
             if not self._wait_for_device_online(
                 adb_device=adb_device,
@@ -297,10 +298,11 @@ class CommandProcessor:
                 should_stop_callback=should_stop_callback,
                 detail_log=detail_log,
             ):
-                return "", True
+                return "", True, had_recovery
             result = self.send(command, config, start_stream=False)
             if not self._looks_like_device_disconnect(result):
-                return result, False
+                return result, False, had_recovery
+            had_recovery = True
             message = "命令执行期间检测到设备掉线，进入等待恢复流程。"
             self._emit_progress(progress_callback, message)
             detail_log.write(f"{message}\n")
@@ -521,7 +523,7 @@ class CommandProcessor:
                         continue
                     run_config = self._config_with_step_value(run_config, step, value)
                     start_ts = time.perf_counter()
-                    result, was_stopped = self._send_with_device_recovery(
+                    result, was_stopped, had_recovery = self._send_with_device_recovery(
                         command=step,
                         config=run_config,
                         progress_callback=progress_callback,
@@ -535,6 +537,9 @@ class CommandProcessor:
                     elapsed = time.perf_counter() - start_ts
                     total_elapsed += elapsed
                     detail_log.write(f"执行完成 step={step} value={value} 用时={elapsed:.3f}s\n{result}\n\n")
+                    if had_recovery:
+                        applied_value = None
+                        detail_log.write("设备重连后，重置本轮已应用参数缓存，后续参数将全部重新发送。\n")
                     applied_value = value
                     handle.write(f"sensor idx={sensor_idx} sensor mode={sensor_mode} {step}={value}\n{result}\n\n")
         sweep_elapsed = time.perf_counter() - sweep_start
@@ -615,7 +620,7 @@ class CommandProcessor:
                                 continue
                             run_config = self._config_with_step_value(run_config, step, value)
                             start_ts = time.perf_counter()
-                            final_result, was_stopped = self._send_with_device_recovery(
+                            final_result, was_stopped, had_recovery = self._send_with_device_recovery(
                                 command=step,
                                 config=run_config,
                                 progress_callback=progress_callback,
@@ -629,6 +634,9 @@ class CommandProcessor:
                             elapsed = time.perf_counter() - start_ts
                             total_elapsed += elapsed
                             detail_log.write(f"子步骤完成 step={step} value={value} 用时={elapsed:.3f}s\n{final_result}\n")
+                            if had_recovery:
+                                applied_values = {}
+                                detail_log.write("设备重连后，重置本轮已应用参数缓存，后续参数将全部重新发送。\n")
                             applied_values[step] = value
                         detail_log.write("\n")
                         writer.writerow([round_index, sensor_idx, sensor_mode, *values, self._result_symbol(final_result)])
