@@ -11,6 +11,15 @@ import os
 import subprocess
 from typing import TextIO
 
+from app.core.auto_test_incremental import (
+    AutoTestPlanner,
+    AutoTestRepository,
+    ComboResult,
+    RunStatus,
+    TestContext,
+    combo_signature,
+    schema_signature,
+)
 from app.core.config_manager import AppConfig
 from app.core.eye_scan_module import EyeScanCommand, EyeScanModule
 from app.core.seninf_path_resolver import SeninfPathResolver
@@ -47,6 +56,7 @@ class CommandProcessor:
     _DEVICE_OFFLINE_RESET_SECONDS = 10
     _DEVICE_RECOVERY_STABILIZE_SECONDS = 30
     _STREAM_CHECK_TOKEN = "__STREAM_RUNNING__"
+    _INCREMENTAL_DB_PATH = Path("configs") / "auto_test_outputs" / "auto_test_incremental.db"
 
     def __init__(self) -> None:
         self._stream_processes: dict[tuple[str, int, int], subprocess.Popen[str]] = {}
@@ -509,6 +519,24 @@ class CommandProcessor:
             total *= len(values)
         return total * target_count * max(config.auto_loop_count, 1)
 
+    @staticmethod
+    def _parse_incremental_context(config: AppConfig) -> tuple[TestContext, float] | None:
+        values = [config.auto_project_name, config.auto_band, config.auto_frequency, config.auto_power]
+        if not all(value.strip() for value in values):
+            return None
+        try:
+            power_value = float(config.auto_power)
+        except ValueError:
+            return None
+        return (
+            TestContext(
+                project_name=config.auto_project_name,
+                band=config.auto_band,
+                frequency=config.auto_frequency,
+            ),
+            power_value,
+        )
+
     def _parse_auto_steps(self, step_text: str) -> list[str]:
         if not step_text.strip():
             return list(self._DEFAULT_AUTO_STEPS)
@@ -628,107 +656,176 @@ class CommandProcessor:
         targets = self._build_targets(config)
         header = ["round", "sensor idx", "sensor mode", *steps, "final_result"]
         count = 0
+        loop_count = max(config.auto_loop_count, 1)
+
         per_round_total = max(len(targets), 1)
         for values in candidates:
             per_round_total *= len(values)
-        loop_count = max(config.auto_loop_count, 1)
+
+        all_cases: list[tuple[int, int, tuple[int, ...], str, dict[str, int]]] = []
+        for sensor_idx, sensor_mode in targets:
+            for values in product(*candidates):
+                combo_payload = {"sensor idx": sensor_idx, "sensor mode": sensor_mode}
+                combo_payload.update({step: value for step, value in zip(steps, values)})
+                combo_id = combo_signature(combo_payload)
+                all_cases.append((sensor_idx, sensor_mode, values, combo_id, combo_payload))
+
+        repository: AutoTestRepository | None = None
+        run_id: int | None = None
+        plan_set: set[str] | None = None
+        run_status = RunStatus.SUCCESS
+        incremental_context = self._parse_incremental_context(config)
+
+        if incremental_context is not None:
+            context, target_power = incremental_context
+            repository = AutoTestRepository(self._INCREMENTAL_DB_PATH)
+            planner = AutoTestPlanner(repository)
+            current_combo_ids = {case[3] for case in all_cases}
+            details = planner.build_plan(context, target_power, current_combo_ids)
+            run_id = repository.create_run(
+                context=context,
+                power=target_power,
+                param_schema_hash=schema_signature(["sensor idx", "sensor mode", *steps]),
+                status=RunStatus.RUNNING,
+            )
+            for _, _, _, combo_id, combo_payload in all_cases:
+                repository.upsert_combo_catalog(context, combo_id, combo_payload, run_id)
+            plan_set = details.plan_set
+            per_round_total = len(plan_set)
+            detail_log.write(
+                "增量计划: "
+                f"current={len(details.current_set)} inherited={len(details.inherited_set)} "
+                f"new={len(details.new_set)} plan={len(details.plan_set)}\n"
+            )
+            if details.base_run is not None:
+                detail_log.write(
+                    f"增量基线: run_id={details.base_run.run_id} power={details.base_run.power}\n"
+                )
+            if plan_set:
+                self._emit_progress(progress_callback, f"增量模式已启用，本次计划执行 {len(plan_set)} 组参数。")
+            else:
+                self._emit_progress(progress_callback, "增量模式已启用，本次无可执行参数组合。")
 
         total_elapsed = 0.0
-        with csv_path.open("w", newline="", encoding="utf-8") as handle:
-            writer = csv.writer(handle)
-            writer.writerow(header)
-            self._flush_file(handle)
-            index = 0
-            for round_index in range(1, loop_count + 1):
-                round_start = time.perf_counter()
-                round_case_index = 0
-                for sensor_idx, sensor_mode in targets:
-                    run_config = self._config_with_target(config, sensor_idx=sensor_idx, sensor_mode=sensor_mode)
-                    if not self._start_stream_for_config(
-                        run_config,
-                        progress_callback=progress_callback,
-                        should_stop_callback=should_stop_callback,
-                        detail_log=detail_log,
-                    ):
-                        self._emit_progress(progress_callback, "收到停止请求，终止当前自动化任务。")
-                        detail_log.write("收到停止请求，终止当前自动化任务。\n")
-                        return count, total_elapsed
-                    try:
-                        applied_values: dict[str, int] = {}
-                        for values in product(*candidates):
-                            if self._should_stop(should_stop_callback):
-                                self._emit_progress(progress_callback, "收到停止请求，终止当前自动化任务。")
-                                detail_log.write("收到停止请求，终止当前自动化任务。\n")
-                                return count, total_elapsed
-                            if self._ensure_stream_for_config(
-                                run_config,
-                                progress_callback=progress_callback,
-                                should_stop_callback=should_stop_callback,
-                                detail_log=detail_log,
-                            ):
-                                applied_values = {}
-                                detail_log.write("检测到流未运行，已重新起流并将重新发送全部步骤命令。\n")
-                            index += 1
-                            round_case_index += 1
-                            self._emit_progress(
-                                progress_callback,
-                                f"次数-{round_index}/{loop_count} 本次进度-{round_case_index}/{per_round_total}",
-                            )
-                            progress_detail = ", ".join(f"{step}={value}" for step, value in zip(steps, values))
-                            detail_log.write(
-                                f"[多参数] round={round_index}/{loop_count} index={round_case_index}/{per_round_total} "
-                                f"global_index={index} sensor idx={sensor_idx}, sensor mode={sensor_mode}, {progress_detail}\n"
-                            )
-                            final_result = ""
-                            while True:
-                                restart_all_steps = False
-                                for step, value in zip(steps, values):
-                                    if self._should_stop(should_stop_callback):
-                                        self._emit_progress(progress_callback, "收到停止请求，终止当前自动化任务。")
-                                        detail_log.write("收到停止请求，终止当前自动化任务。\n")
-                                        return count, total_elapsed
-                                    if applied_values.get(step) == value:
-                                        detail_log.write(f"跳过未变化参数 step={step} value={value}\n")
-                                        continue
-                                    run_config = self._config_with_step_value(run_config, step, value)
-                                    start_ts = time.perf_counter()
-                                    final_result, was_stopped, had_recovery = self._send_with_device_recovery(
-                                        command=step,
-                                        config=run_config,
-                                        progress_callback=progress_callback,
-                                        should_stop_callback=should_stop_callback,
-                                        detail_log=detail_log,
-                                    )
-                                    if was_stopped:
-                                        self._emit_progress(progress_callback, "收到停止请求，终止当前自动化任务。")
-                                        detail_log.write("收到停止请求，终止当前自动化任务。\n")
-                                        return count, total_elapsed
-                                    elapsed = time.perf_counter() - start_ts
-                                    total_elapsed += elapsed
-                                    detail_log.write(f"子步骤完成 step={step} value={value} 用时={elapsed:.3f}s\n{final_result}\n")
-                                    if had_recovery:
-                                        applied_values = {}
-                                        restart_all_steps = True
-                                        detail_log.write("设备重连后已重启流，当前组合将从第一步重新下发全部参数。\n")
-                                        break
-                                    applied_values[step] = value
-                                if not restart_all_steps:
-                                    break
+        try:
+            with csv_path.open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(header)
+                self._flush_file(handle)
+                index = 0
+                for round_index in range(1, loop_count + 1):
+                    round_start = time.perf_counter()
+                    round_case_index = 0
+                    for sensor_idx, sensor_mode in targets:
+                        run_config = self._config_with_target(config, sensor_idx=sensor_idx, sensor_mode=sensor_mode)
+                        if not self._start_stream_for_config(
+                            run_config,
+                            progress_callback=progress_callback,
+                            should_stop_callback=should_stop_callback,
+                            detail_log=detail_log,
+                        ):
+                            self._emit_progress(progress_callback, "收到停止请求，终止当前自动化任务。")
+                            detail_log.write("收到停止请求，终止当前自动化任务。\n")
+                            run_status = RunStatus.STOPPED
+                            return count, total_elapsed
+                        try:
+                            applied_values: dict[str, int] = {}
+                            for values in product(*candidates):
+                                combo_payload = {"sensor idx": sensor_idx, "sensor mode": sensor_mode}
+                                combo_payload.update({step: value for step, value in zip(steps, values)})
+                                combo_id = combo_signature(combo_payload)
+                                if plan_set is not None and combo_id not in plan_set:
+                                    continue
                                 if self._should_stop(should_stop_callback):
                                     self._emit_progress(progress_callback, "收到停止请求，终止当前自动化任务。")
                                     detail_log.write("收到停止请求，终止当前自动化任务。\n")
+                                    run_status = RunStatus.STOPPED
                                     return count, total_elapsed
-                            detail_log.write("\n")
-                            writer.writerow([round_index, sensor_idx, sensor_mode, *values, self._result_symbol(final_result)])
-                            self._flush_file(handle)
-                            count += 1
-                    finally:
-                        if not run_config.auto_manual_stream:
-                            self._stop_stream(adb_device=run_config.adb_device)
-                            detail_log.write("当前目标执行结束，已关闭当前流。\n")
-                round_elapsed = time.perf_counter() - round_start
-                self._emit_progress(progress_callback, f"次数-{round_index}/{loop_count} 压测完成 用时={round_elapsed:.3f}s")
-        return count, total_elapsed
+                                if self._ensure_stream_for_config(
+                                    run_config,
+                                    progress_callback=progress_callback,
+                                    should_stop_callback=should_stop_callback,
+                                    detail_log=detail_log,
+                                ):
+                                    applied_values = {}
+                                    detail_log.write("检测到流未运行，已重新起流并将重新发送全部步骤命令。\n")
+                                index += 1
+                                round_case_index += 1
+                                self._emit_progress(
+                                    progress_callback,
+                                    f"次数-{round_index}/{loop_count} 本次进度-{round_case_index}/{max(per_round_total, 1)}",
+                                )
+                                progress_detail = ", ".join(f"{step}={value}" for step, value in zip(steps, values))
+                                detail_log.write(
+                                    f"[多参数] round={round_index}/{loop_count} index={round_case_index}/{max(per_round_total, 1)} "
+                                    f"global_index={index} sensor idx={sensor_idx}, sensor mode={sensor_mode}, {progress_detail}\n"
+                                )
+                                final_result = ""
+                                while True:
+                                    restart_all_steps = False
+                                    for step, value in zip(steps, values):
+                                        if self._should_stop(should_stop_callback):
+                                            self._emit_progress(progress_callback, "收到停止请求，终止当前自动化任务。")
+                                            detail_log.write("收到停止请求，终止当前自动化任务。\n")
+                                            run_status = RunStatus.STOPPED
+                                            return count, total_elapsed
+                                        if applied_values.get(step) == value:
+                                            detail_log.write(f"跳过未变化参数 step={step} value={value}\n")
+                                            continue
+                                        run_config = self._config_with_step_value(run_config, step, value)
+                                        start_ts = time.perf_counter()
+                                        final_result, was_stopped, had_recovery = self._send_with_device_recovery(
+                                            command=step,
+                                            config=run_config,
+                                            progress_callback=progress_callback,
+                                            should_stop_callback=should_stop_callback,
+                                            detail_log=detail_log,
+                                        )
+                                        if was_stopped:
+                                            self._emit_progress(progress_callback, "收到停止请求，终止当前自动化任务。")
+                                            detail_log.write("收到停止请求，终止当前自动化任务。\n")
+                                            run_status = RunStatus.STOPPED
+                                            return count, total_elapsed
+                                        elapsed = time.perf_counter() - start_ts
+                                        total_elapsed += elapsed
+                                        detail_log.write(f"子步骤完成 step={step} value={value} 用时={elapsed:.3f}s\\n{final_result}\n")
+                                        if had_recovery:
+                                            applied_values = {}
+                                            restart_all_steps = True
+                                            detail_log.write("设备重连后已重启流，当前组合将从第一步重新下发全部参数。\n")
+                                            break
+                                        applied_values[step] = value
+                                    if not restart_all_steps:
+                                        break
+                                    if self._should_stop(should_stop_callback):
+                                        self._emit_progress(progress_callback, "收到停止请求，终止当前自动化任务。")
+                                        detail_log.write("收到停止请求，终止当前自动化任务。\n")
+                                        run_status = RunStatus.STOPPED
+                                        return count, total_elapsed
+                                detail_log.write("\n")
+                                result_symbol = self._result_symbol(final_result)
+                                writer.writerow([round_index, sensor_idx, sensor_mode, *values, result_symbol])
+                                self._flush_file(handle)
+                                if repository is not None and run_id is not None:
+                                    repository.record_combo_result(
+                                        run_id,
+                                        combo_id,
+                                        self._combo_result_from_symbol(result_symbol),
+                                        detail=f"round={round_index}",
+                                    )
+                                count += 1
+                        finally:
+                            if not run_config.auto_manual_stream:
+                                self._stop_stream(adb_device=run_config.adb_device)
+                                detail_log.write("当前目标执行结束，已关闭当前流。\n")
+                    round_elapsed = time.perf_counter() - round_start
+                    self._emit_progress(progress_callback, f"次数-{round_index}/{loop_count} 压测完成 用时={round_elapsed:.3f}s")
+            if repository is not None and count == 0 and plan_set is None:
+                run_status = RunStatus.FAILED
+            return count, total_elapsed
+        finally:
+            if repository is not None and run_id is not None:
+                repository.finish_run(run_id, run_status)
 
     @staticmethod
     def _flush_file(handle: TextIO) -> None:
@@ -743,6 +840,14 @@ class CommandProcessor:
         if "FAIL" in upper:
             return "X"
         return "P"
+
+    @staticmethod
+    def _combo_result_from_symbol(symbol: str) -> ComboResult:
+        if symbol == "O":
+            return ComboResult.PASS
+        if symbol == "X":
+            return ComboResult.FAIL
+        return ComboResult.SKIP
 
     def _start_stream_for_config(
         self,

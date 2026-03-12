@@ -69,6 +69,11 @@ class MainWindow(QMainWindow):
         self._auto_loop_count.setRange(1, 9999)
         self._auto_loop_count.setValue(1)
 
+        self._auto_project_name = QLineEdit()
+        self._auto_band = QLineEdit()
+        self._auto_frequency = QLineEdit()
+        self._auto_power = QLineEdit()
+
         self._cdr_delay_start = QSpinBox()
         self._cdr_delay_start.setRange(0, 31)
 
@@ -267,6 +272,10 @@ class MainWindow(QMainWindow):
         auto_layout = QVBoxLayout()
         auto_form = QFormLayout()
         auto_form.addRow("压测次数", self._auto_loop_count)
+        auto_form.addRow("项目名称", self._auto_project_name)
+        auto_form.addRow("频段", self._auto_band)
+        auto_form.addRow("频点", self._auto_frequency)
+        auto_form.addRow("功率", self._auto_power)
         auto_form.addRow("Sensor idx", self._auto_sensor_idx)
         auto_form.addRow("Sensor mode", self._auto_sensor_mode)
         auto_form.addRow(
@@ -463,6 +472,10 @@ class MainWindow(QMainWindow):
             auto_eq_bw_values=[int(value) for value in self._auto_eq_bw.selected_texts],
             auto_manual_stream=self._auto_manual_stream.isChecked(),
             auto_loop_count=self._auto_loop_count.value(),
+            auto_project_name=self._auto_project_name.text().strip(),
+            auto_band=self._auto_band.text().strip(),
+            auto_frequency=self._auto_frequency.text().strip(),
+            auto_power=self._auto_power.text().strip(),
         )
 
     def _apply_manual_config(self, config: AppConfig) -> None:
@@ -497,6 +510,10 @@ class MainWindow(QMainWindow):
         self._auto_eq_bw.select_many([str(value) for value in (config.auto_eq_bw_values or [0, 1, 2, 3])])
         self._auto_manual_stream.setChecked(config.auto_manual_stream)
         self._auto_loop_count.setValue(config.auto_loop_count)
+        self._auto_project_name.setText(config.auto_project_name)
+        self._auto_band.setText(config.auto_band)
+        self._auto_frequency.setText(config.auto_frequency)
+        self._auto_power.setText(config.auto_power)
         self._update_mode_dependent_fields()
 
     def _parse_auto_sensor_modes(self) -> list[int]:
