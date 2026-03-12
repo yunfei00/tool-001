@@ -39,6 +39,10 @@ class AppConfig:
     auto_eq_bw_values: list[int] | None = None
     auto_manual_stream: bool = False
     auto_loop_count: int = 1
+    auto_project_name: str = ""
+    auto_band: str = ""
+    auto_frequency: str = ""
+    auto_power: str = ""
 
 
 class ConfigManager:
@@ -123,6 +127,10 @@ class ConfigManager:
             ),
             auto_manual_stream=self._normalize_is_dphy(raw_data.get("auto_manual_stream")),
             auto_loop_count=self._normalize_integer(raw_data.get("auto_loop_count"), minimum=1, maximum=9999, default=1),
+            auto_project_name=self._normalize_text(raw_data.get("auto_project_name")),
+            auto_band=self._normalize_text(raw_data.get("auto_band")),
+            auto_frequency=self._normalize_text(raw_data.get("auto_frequency")),
+            auto_power=self._normalize_text(raw_data.get("auto_power")),
         )
 
     def save(self, config: AppConfig) -> None:
@@ -239,3 +247,9 @@ class ConfigManager:
         except (TypeError, ValueError):
             return default
         return min(max(value, minimum), maximum)
+
+    @staticmethod
+    def _normalize_text(raw_value: object) -> str:
+        if raw_value is None:
+            return ""
+        return str(raw_value).strip()
