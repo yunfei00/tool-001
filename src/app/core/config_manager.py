@@ -43,6 +43,7 @@ class AppConfig:
     auto_band: str = ""
     auto_frequency: str = ""
     auto_power: str = ""
+    auto_context_history: list[dict[str, str]] | None = None
 
 
 class ConfigManager:
@@ -131,6 +132,7 @@ class ConfigManager:
             auto_band=self._normalize_text(raw_data.get("auto_band")),
             auto_frequency=self._normalize_text(raw_data.get("auto_frequency")),
             auto_power=self._normalize_text(raw_data.get("auto_power")),
+            auto_context_history=self._normalize_auto_context_history(raw_data.get("auto_context_history")),
         )
 
     def save(self, config: AppConfig) -> None:
@@ -253,3 +255,33 @@ class ConfigManager:
         if raw_value is None:
             return ""
         return str(raw_value).strip()
+
+    @classmethod
+    def _normalize_auto_context_history(cls, raw_history: object) -> list[dict[str, str]] | None:
+        if not isinstance(raw_history, list):
+            return None
+
+        normalized: list[dict[str, str]] = []
+        seen: set[tuple[str, str, str, str]] = set()
+        for item in raw_history:
+            if not isinstance(item, dict):
+                continue
+            project_name = cls._normalize_text(item.get("project_name"))
+            band = cls._normalize_text(item.get("band"))
+            frequency = cls._normalize_text(item.get("frequency"))
+            power = cls._normalize_text(item.get("power"))
+            if not all((project_name, band, frequency, power)):
+                continue
+            key = (project_name, band, frequency, power)
+            if key in seen:
+                continue
+            seen.add(key)
+            normalized.append(
+                {
+                    "project_name": project_name,
+                    "band": band,
+                    "frequency": frequency,
+                    "power": power,
+                }
+            )
+        return normalized or None

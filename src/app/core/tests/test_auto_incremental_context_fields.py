@@ -42,6 +42,51 @@ class AutoIncrementalContextFieldsTest(unittest.TestCase):
             self.assertEqual(loaded.auto_frequency, "2570")
             self.assertEqual(loaded.auto_power, "18")
 
+    def test_config_manager_persists_auto_context_history(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "default.yaml"
+            manager = ConfigManager(config_path)
+            manager.save(
+                AppConfig(
+                    mode="auto",
+                    auto_context_history=[
+                        {"project_name": "p1", "band": "n78", "frequency": "3500", "power": "10"},
+                        {"project_name": "p2", "band": "n41", "frequency": "2600", "power": "12"},
+                    ],
+                )
+            )
+            loaded = manager.load()
+            self.assertEqual(
+                loaded.auto_context_history,
+                [
+                    {"project_name": "p1", "band": "n78", "frequency": "3500", "power": "10"},
+                    {"project_name": "p2", "band": "n41", "frequency": "2600", "power": "12"},
+                ],
+            )
+
+    def test_config_manager_filters_invalid_auto_context_history(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "default.yaml"
+            config_path.write_text(
+                """
+{
+  "mode": "auto",
+  "auto_context_history": [
+    {"project_name": "p1", "band": "n78", "frequency": "3500", "power": "10"},
+    {"project_name": "", "band": "n78", "frequency": "3500", "power": "10"},
+    {"project_name": "p1", "band": "n78", "frequency": "3500", "power": "10"}
+  ]
+}
+""".strip(),
+                encoding="utf-8",
+            )
+            manager = ConfigManager(config_path)
+            loaded = manager.load()
+            self.assertEqual(
+                loaded.auto_context_history,
+                [{"project_name": "p1", "band": "n78", "frequency": "3500", "power": "10"}],
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

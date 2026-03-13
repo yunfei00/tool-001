@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
     QWidget,
     QFileDialog,
 )
-from PySide6.QtCore import QObject, QThread, Signal, QUrl
+from PySide6.QtCore import QObject, QSignalBlocker, QThread, Signal, QUrl
 
 from app.core.adb_device_service import AdbDeviceService
 from app.core.command_processor import CommandProcessor
@@ -69,10 +69,20 @@ class MainWindow(QMainWindow):
         self._auto_loop_count.setRange(1, 9999)
         self._auto_loop_count.setValue(1)
 
-        self._auto_project_name = QLineEdit()
-        self._auto_band = QLineEdit()
-        self._auto_frequency = QLineEdit()
-        self._auto_power = QLineEdit()
+        self._auto_project_name = QComboBox()
+        self._auto_project_name.setEditable(True)
+        self._auto_project_name.setInsertPolicy(QComboBox.NoInsert)
+        self._auto_band = QComboBox()
+        self._auto_band.setEditable(True)
+        self._auto_band.setInsertPolicy(QComboBox.NoInsert)
+        self._auto_frequency = QComboBox()
+        self._auto_frequency.setEditable(True)
+        self._auto_frequency.setInsertPolicy(QComboBox.NoInsert)
+        self._auto_power = QComboBox()
+        self._auto_power.setEditable(True)
+        self._auto_power.setInsertPolicy(QComboBox.NoInsert)
+        self._auto_context_history: list[dict[str, str]] = []
+        self._auto_context_history_limit = 30
 
         self._cdr_delay_start = QSpinBox()
         self._cdr_delay_start.setRange(0, 31)
@@ -415,6 +425,10 @@ class MainWindow(QMainWindow):
         self._analysis_status_filter.currentIndexChanged.connect(self._apply_analysis_filter)
         self._analysis_keyword_filter.textChanged.connect(self._apply_analysis_filter)
 
+        self._auto_project_name.currentTextChanged.connect(self._on_auto_project_name_changed)
+        self._auto_band.currentTextChanged.connect(self._on_auto_band_changed)
+        self._auto_frequency.currentTextChanged.connect(self._on_auto_frequency_changed)
+
     def _collect_manual_config(self) -> AppConfig:
         return AppConfig(
             mode="manual",
@@ -472,10 +486,11 @@ class MainWindow(QMainWindow):
             auto_eq_bw_values=[int(value) for value in self._auto_eq_bw.selected_texts],
             auto_manual_stream=self._auto_manual_stream.isChecked(),
             auto_loop_count=self._auto_loop_count.value(),
-            auto_project_name=self._auto_project_name.text().strip(),
-            auto_band=self._auto_band.text().strip(),
-            auto_frequency=self._auto_frequency.text().strip(),
-            auto_power=self._auto_power.text().strip(),
+            auto_project_name=self._auto_project_name.currentText().strip(),
+            auto_band=self._auto_band.currentText().strip(),
+            auto_frequency=self._auto_frequency.currentText().strip(),
+            auto_power=self._auto_power.currentText().strip(),
+            auto_context_history=self._auto_context_history,
         )
 
     def _apply_manual_config(self, config: AppConfig) -> None:
@@ -510,11 +525,138 @@ class MainWindow(QMainWindow):
         self._auto_eq_bw.select_many([str(value) for value in (config.auto_eq_bw_values or [0, 1, 2, 3])])
         self._auto_manual_stream.setChecked(config.auto_manual_stream)
         self._auto_loop_count.setValue(config.auto_loop_count)
-        self._auto_project_name.setText(config.auto_project_name)
-        self._auto_band.setText(config.auto_band)
-        self._auto_frequency.setText(config.auto_frequency)
-        self._auto_power.setText(config.auto_power)
+        self._auto_context_history = list(config.auto_context_history or [])
+        self._refresh_auto_context_combos()
+        self._auto_project_name.setEditText(config.auto_project_name)
+        self._auto_band.setEditText(config.auto_band)
+        self._auto_frequency.setEditText(config.auto_frequency)
+        self._auto_power.setEditText(config.auto_power)
         self._update_mode_dependent_fields()
+
+    @staticmethod
+    def _entry_key(entry: dict[str, str]) -> tuple[str, str, str, str]:
+        return (entry["project_name"], entry["band"], entry["frequency"], entry["power"])
+
+    def _refresh_auto_context_combos(self) -> None:
+        selected_project = self._auto_project_name.currentText().strip()
+        selected_band = self._auto_band.currentText().strip()
+        selected_frequency = self._auto_frequency.currentText().strip()
+        selected_power = self._auto_power.currentText().strip()
+
+        projects: list[str] = []
+        for item in self._auto_context_history:
+            value = item["project_name"]
+            if value not in projects:
+                projects.append(value)
+
+        with QSignalBlocker(self._auto_project_name):
+            self._auto_project_name.clear()
+            self._auto_project_name.addItems(projects)
+            if selected_project:
+                self._auto_project_name.setEditText(selected_project)
+
+        self._refresh_auto_band_combo()
+        self._refresh_auto_frequency_combo()
+        self._refresh_auto_power_combo()
+
+        if selected_band:
+            self._auto_band.setEditText(selected_band)
+        if selected_frequency:
+            self._auto_frequency.setEditText(selected_frequency)
+        if selected_power:
+            self._auto_power.setEditText(selected_power)
+
+    def _refresh_auto_band_combo(self) -> None:
+        project_name = self._auto_project_name.currentText().strip()
+        current_band = self._auto_band.currentText().strip()
+        bands: list[str] = []
+        for item in self._auto_context_history:
+            if project_name and item["project_name"] != project_name:
+                continue
+            value = item["band"]
+            if value not in bands:
+                bands.append(value)
+
+        with QSignalBlocker(self._auto_band):
+            self._auto_band.clear()
+            self._auto_band.addItems(bands)
+            if current_band:
+                self._auto_band.setEditText(current_band)
+
+    def _refresh_auto_frequency_combo(self) -> None:
+        project_name = self._auto_project_name.currentText().strip()
+        band = self._auto_band.currentText().strip()
+        current_frequency = self._auto_frequency.currentText().strip()
+        frequencies: list[str] = []
+        for item in self._auto_context_history:
+            if project_name and item["project_name"] != project_name:
+                continue
+            if band and item["band"] != band:
+                continue
+            value = item["frequency"]
+            if value not in frequencies:
+                frequencies.append(value)
+
+        with QSignalBlocker(self._auto_frequency):
+            self._auto_frequency.clear()
+            self._auto_frequency.addItems(frequencies)
+            if current_frequency:
+                self._auto_frequency.setEditText(current_frequency)
+
+    def _refresh_auto_power_combo(self) -> None:
+        project_name = self._auto_project_name.currentText().strip()
+        band = self._auto_band.currentText().strip()
+        frequency = self._auto_frequency.currentText().strip()
+        current_power = self._auto_power.currentText().strip()
+        powers: list[str] = []
+        for item in self._auto_context_history:
+            if project_name and item["project_name"] != project_name:
+                continue
+            if band and item["band"] != band:
+                continue
+            if frequency and item["frequency"] != frequency:
+                continue
+            value = item["power"]
+            if value not in powers:
+                powers.append(value)
+
+        with QSignalBlocker(self._auto_power):
+            self._auto_power.clear()
+            self._auto_power.addItems(powers)
+            if current_power:
+                self._auto_power.setEditText(current_power)
+
+    def _on_auto_project_name_changed(self, _: str) -> None:
+        self._refresh_auto_band_combo()
+        self._refresh_auto_frequency_combo()
+        self._refresh_auto_power_combo()
+
+    def _on_auto_band_changed(self, _: str) -> None:
+        self._refresh_auto_frequency_combo()
+        self._refresh_auto_power_combo()
+
+    def _on_auto_frequency_changed(self, _: str) -> None:
+        self._refresh_auto_power_combo()
+
+    def _remember_current_auto_context(self) -> None:
+        project_name = self._auto_project_name.currentText().strip()
+        band = self._auto_band.currentText().strip()
+        frequency = self._auto_frequency.currentText().strip()
+        power = self._auto_power.currentText().strip()
+        if not all((project_name, band, frequency, power)):
+            return
+
+        entry = {
+            "project_name": project_name,
+            "band": band,
+            "frequency": frequency,
+            "power": power,
+        }
+        key = self._entry_key(entry)
+
+        deduped = [item for item in self._auto_context_history if self._entry_key(item) != key]
+        self._auto_context_history = [entry, *deduped][: self._auto_context_history_limit]
+        self._refresh_auto_context_combos()
 
     def _parse_auto_sensor_modes(self) -> list[int]:
         selected_modes = [int(value) for value in self._auto_sensor_mode.selected_texts]
@@ -683,6 +825,7 @@ class MainWindow(QMainWindow):
         self._append_auto_log(f"Loaded config from {self._config_manager.config_path}")
 
     def save_auto_config(self) -> None:
+        self._remember_current_auto_context()
         config = self._collect_auto_config()
         self._config_manager.save(config)
         self._append_auto_log(f"Saved config to {self._config_manager.config_path}")
